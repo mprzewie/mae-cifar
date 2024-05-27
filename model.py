@@ -143,7 +143,7 @@ class MAE_ViT(torch.nn.Module):
         return predicted_img, mask
 
 class ViT_Classifier(torch.nn.Module):
-    def __init__(self, encoder : MAE_Encoder, num_classes=10) -> None:
+    def __init__(self, encoder : MAE_Encoder, num_classes=10, linprobe:bool=False) -> None:
         super().__init__()
         self.cls_token = encoder.cls_token
         self.pos_embedding = encoder.pos_embedding
@@ -151,7 +151,7 @@ class ViT_Classifier(torch.nn.Module):
         self.transformer = encoder.transformer
         self.layer_norm = encoder.layer_norm
         self.head = torch.nn.Linear(self.pos_embedding.shape[-1], num_classes)
-
+        self.linprobe = linprobe
     def forward(self, img):
         patches = self.patchify(img)
         patches = rearrange(patches, 'b c h w -> (h w) b c')
@@ -160,7 +160,11 @@ class ViT_Classifier(torch.nn.Module):
         patches = rearrange(patches, 't b c -> b t c')
         features = self.layer_norm(self.transformer(patches))
         features = rearrange(features, 'b t c -> t b c')
-        logits = self.head(features[0])
+
+        if self.linprobe:
+            logits = self.head(features[0].detach())
+        else:
+            logits = self.head(features[0])
         return logits
 
 

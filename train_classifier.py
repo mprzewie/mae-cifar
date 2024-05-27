@@ -21,6 +21,7 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_epoch', type=int, default=5)
     parser.add_argument('--pretrained_model_path', type=str, default=None)
     parser.add_argument('--output_model_path', type=str, default='vit-t-classifier-from_scratch.pt')
+    parser.add_argument("--linprobe", action="store_true")
 
     args = parser.parse_args()
 
@@ -44,12 +45,16 @@ if __name__ == '__main__':
     else:
         model = MAE_ViT()
         writer = SummaryWriter(os.path.join('logs', 'cifar10', 'scratch-cls'))
-    model = ViT_Classifier(model.encoder, num_classes=10).to(device)
+    model = ViT_Classifier(model.encoder, num_classes=10, linprobe=False).to(device)
 
     loss_fn = torch.nn.CrossEntropyLoss()
     acc_fn = lambda logit, label: torch.mean((logit.argmax(dim=-1) == label).float())
 
-    optim = torch.optim.AdamW(model.parameters(), lr=args.base_learning_rate * args.batch_size / 256, betas=(0.9, 0.999), weight_decay=args.weight_decay)
+    if args.linprobe:
+        optim = torch.optim.AdamW(model.head.parameters(),lr=args.base_learning_rate * args.batch_size / 256, betas=(0.9, 0.999), weight_decay=args.weight_decay)
+    else:
+        optim = torch.optim.AdamW(model.parameters(), lr=args.base_learning_rate * args.batch_size / 256, betas=(0.9, 0.999), weight_decay=args.weight_decay)
+
     lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8), 0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func, verbose=True)
 
@@ -99,5 +104,5 @@ if __name__ == '__main__':
             print(f'saving best model with acc {best_val_acc} at {e} epoch!')       
             torch.save(model, args.output_model_path)
 
-        writer.add_scalars('cls/loss', {'train' : avg_train_loss, 'val' : avg_val_loss}, global_step=e)
-        writer.add_scalars('cls/acc', {'train' : avg_train_acc, 'val' : avg_val_acc}, global_step=e)
+        writer.add_scalars('test_v1/loss', {'train' : avg_train_loss, 'val' : avg_val_loss}, global_step=e)
+        writer.add_scalars('test_v1/accuracy', {'train' : avg_train_acc, 'val' : avg_val_acc}, global_step=e)
