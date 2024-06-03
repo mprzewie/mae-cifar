@@ -26,11 +26,12 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_epoch', type=int, default=200)
     parser.add_argument("--logdir", type=Path)
     parser.add_argument("--umae_lambda", type=float, default=0)
-    # parser.add_argument('--model_path', type=str, default='vit-t-mae.pt')
 
     args = parser.parse_args()
 
     setup_seed(args.seed)
+
+    args.logdir.mkdir(parents=True, exist_ok=True)
 
     maybe_setup_wandb(logdir=args.logdir, args=args)
 

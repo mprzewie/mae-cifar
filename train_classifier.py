@@ -104,8 +104,8 @@ if __name__ == '__main__':
 
         if avg_val_acc > best_val_acc:
             best_val_acc = avg_val_acc
-            print(f'saving best model with acc {best_val_acc} at {e} epoch!')       
-            torch.save(model, args.output_model_path)
+            print(f'best model with acc {best_val_acc} at {e} epoch!')
+            # torch.save(model, args.output_model_path)
 
         writer.add_scalars('test_v1/loss', {'train' : avg_train_loss, 'val' : avg_val_loss}, global_step=e)
         writer.add_scalars('test_v1/accuracy', {'train' : avg_train_acc, 'val' : avg_val_acc}, global_step=e)
