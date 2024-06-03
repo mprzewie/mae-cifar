@@ -1,6 +1,8 @@
 import os
 import argparse
 import math
+from pathlib import Path
+
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
@@ -8,7 +10,7 @@ from torchvision.transforms import ToTensor, Compose, Normalize
 from tqdm import tqdm
 
 from model import *
-from utils import setup_seed
+from utils import setup_seed, maybe_setup_wandb
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -19,13 +21,16 @@ if __name__ == '__main__':
     parser.add_argument('--weight_decay', type=float, default=0.05)
     parser.add_argument('--total_epoch', type=int, default=100)
     parser.add_argument('--warmup_epoch', type=int, default=5)
-    parser.add_argument('--pretrained_model_path', type=str, default=None)
-    parser.add_argument('--output_model_path', type=str, default='vit-t-classifier-from_scratch.pt')
+    parser.add_argument('--logdir', type=Path)
+    # parser.add_argument('--output_model_path', type=str, default='vit-t-classifier-from_scratch.pt')
     parser.add_argument("--linprobe", action="store_true")
 
     args = parser.parse_args()
 
     setup_seed(args.seed)
+
+    maybe_setup_wandb(logdir=args.logdir, args=args)
+
 
     batch_size = args.batch_size
     load_batch_size = min(args.max_device_batch_size, batch_size)
@@ -39,12 +44,10 @@ if __name__ == '__main__':
     val_dataloader = torch.utils.data.DataLoader(val_dataset, load_batch_size, shuffle=False, num_workers=4)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    if args.pretrained_model_path is not None:
-        model = torch.load(args.pretrained_model_path, map_location='cpu')
-        writer = SummaryWriter(os.path.join('logs', 'cifar10', 'pretrain-cls'))
-    else:
-        model = MAE_ViT()
-        writer = SummaryWriter(os.path.join('logs', 'cifar10', 'scratch-cls'))
+    model = MAE_ViT()
+    ckpt = torch.load(args.logdir / "vit-t-mae.pt", map_location='cpu')
+    model.load_state_dict(ckpt["model"])
+    writer = SummaryWriter(args.logdir)
     model = ViT_Classifier(model.encoder, num_classes=10, linprobe=False).to(device)
 
     loss_fn = torch.nn.CrossEntropyLoss()

@@ -1,6 +1,10 @@
 import os
 import argparse
 import math
+from collections import defaultdict
+from pathlib import Path
+
+import numpy as np
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
@@ -8,7 +12,7 @@ from torchvision.transforms import ToTensor, Compose, Normalize
 from tqdm import tqdm
 
 from model import *
-from utils import setup_seed
+from utils import setup_seed, maybe_setup_wandb
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -20,11 +24,15 @@ if __name__ == '__main__':
     parser.add_argument('--mask_ratio', type=float, default=0.75)
     parser.add_argument('--total_epoch', type=int, default=2000)
     parser.add_argument('--warmup_epoch', type=int, default=200)
-    parser.add_argument('--model_path', type=str, default='vit-t-mae.pt')
+    parser.add_argument("--logdir", type=Path)
+    parser.add_argument("--umae_lambda", type=float, default=0)
+    # parser.add_argument('--model_path', type=str, default='vit-t-mae.pt')
 
     args = parser.parse_args()
 
     setup_seed(args.seed)
+
+    maybe_setup_wandb(logdir=args.logdir, args=args)
 
     batch_size = args.batch_size
     load_batch_size = min(args.max_device_batch_size, batch_size)
@@ -35,7 +43,7 @@ if __name__ == '__main__':
     train_dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
     val_dataset = torchvision.datasets.CIFAR10('data', train=False, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
     dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4)
-    writer = SummaryWriter(os.path.join('logs', 'cifar10', 'mae-pretrain'))
+    writer = SummaryWriter(args.logdir)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     model = MAE_ViT(mask_ratio=args.mask_ratio).to(device)
@@ -47,23 +55,47 @@ if __name__ == '__main__':
     optim.zero_grad()
     for e in range(args.total_epoch):
         model.train()
-        losses = []
-        for img, label in tqdm(iter(dataloader)):
+        metrics = defaultdict(list)
+
+        for img, label in tqdm(iter(dataloader), desc=f"Pretrain: {e}"):
             step_count += 1
             img = img.to(device)
-            predicted_img, mask = model(img)
-            loss = torch.mean((predicted_img - img) ** 2 * mask) / args.mask_ratio
+            predicted_img, mask, features = model(img)
+
+            cls_features = features[0]
+
+            # umae
+            norm_features =  torch.nn.functional.normalize(cls_features)
+            sim = features @ features.T
+            loss_umae = sim.pow(2).mean()
+            ####
+
+            loss_mae = torch.mean((predicted_img - img) ** 2 * mask) / args.mask_ratio
+
+            loss = loss_mae + args.umae_lambda * loss_umae
+
             loss.backward()
             if step_count % steps_per_update == 0:
                 optim.step()
                 optim.zero_grad()
-            losses.append(loss.item())
-        lr_scheduler.step()
-        avg_loss = sum(losses) / len(losses)
-        writer.add_scalar('train_loss_mae', avg_loss, global_step=e)
-        print(f'In epoch {e}, average traning loss is {avg_loss}.')
 
-        ''' visualize the first 16 predicted images on val dataset'''
+            metrics["loss_total"].append(loss.item())
+            metrics["loss_mae"].append(loss_mae.item())
+            metrics["loss_umae"].append(loss_umae.item())
+
+        for k, v in metrics.items():
+            writer.add_scalar(f"train/{k}", np.mean(v), global_step=e)
+        writer.add_scalar("train/epoch", e, global_step=e)
+        writer.add_scalar("train/lr", lr_scheduler.get_lr(), global_step=e)
+        # writer.add_scalar("train/loss_total", loss.item(), global_step=e)
+        lr_scheduler.step()
+        # avg_loss = sum(losses) / len(losses)
+        # writer.add_scalar('train_loss_mae', avg_loss, global_step=e)
+        if e % 10 == 0:
+            print(e, {k: np.mean(v) for k,v in metrics.items()})
+        # print(f'In epoch {e}, average traning loss is {avg_loss}.')
+
+        # ''' visualize the first 16 predicted images on val dataset'''
         # model.eval()
         #
         # with torch.no_grad():
@@ -76,4 +108,11 @@ if __name__ == '__main__':
         #     # writer.add_image('mae_image', (img + 1) / 2, global_step=e)
         
         ''' save model '''
-        torch.save(model, args.model_path)
+        ckpt = {
+            "model": model.state_dict(),
+            "epoch": e,
+            "lr": lr_scheduler.get_lr(),
+            "metrics": {k: np.mean(v) for k,v in metrics.items()}
+
+        }
+        torch.save(ckpt, args.logdir / "vit-t-mae.pt")

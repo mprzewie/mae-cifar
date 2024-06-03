@@ -74,6 +74,7 @@ class MAE_Encoder(torch.nn.Module):
         features = self.layer_norm(self.transformer(patches))
         features = rearrange(features, 'b t c -> t b c')
 
+
         return features, backward_indexes
 
 class MAE_Decoder(torch.nn.Module):
@@ -140,7 +141,7 @@ class MAE_ViT(torch.nn.Module):
     def forward(self, img):
         features, backward_indexes = self.encoder(img)
         predicted_img, mask = self.decoder(features,  backward_indexes)
-        return predicted_img, mask
+        return predicted_img, mask, features
 
 class ViT_Classifier(torch.nn.Module):
     def __init__(self, encoder : MAE_Encoder, num_classes=10, linprobe:bool=False) -> None:
