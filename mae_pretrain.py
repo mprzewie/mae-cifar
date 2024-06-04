@@ -33,7 +33,7 @@ if __name__ == '__main__':
 
     args.logdir.mkdir(parents=True, exist_ok=True)
 
-    maybe_setup_wandb(logdir=args.logdir, args=args)
+    maybe_setup_wandb(logdir=args.logdir, args=args, job_type='pretrain')
 
     batch_size = args.batch_size
     load_batch_size = min(args.max_device_batch_size, batch_size)

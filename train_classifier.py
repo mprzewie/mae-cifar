@@ -29,7 +29,7 @@ if __name__ == '__main__':
 
     setup_seed(args.seed)
 
-    maybe_setup_wandb(logdir=args.logdir, args=args)
+    maybe_setup_wandb(logdir=args.logdir, args=args, job_type=("linprobe" if args.linprobe else "finetune"))
 
 
     batch_size = args.batch_size
@@ -107,5 +107,7 @@ if __name__ == '__main__':
             print(f'best model with acc {best_val_acc} at {e} epoch!')
             # torch.save(model, args.output_model_path)
 
-        writer.add_scalars('test_v1/loss', {'train' : avg_train_loss, 'val' : avg_val_loss}, global_step=e)
-        writer.add_scalars('test_v1/accuracy', {'train' : avg_train_acc, 'val' : avg_val_acc}, global_step=e)
+        writer.add_scalar('eval_loss/train', avg_train_loss, global_step=e)
+        writer.add_scalar('eval_loss/val', avg_val_loss, global_step=e)
+        writer.add_scalar('eval_accuracy/train', avg_train_acc, global_step=e)
+        writer.add_scalar('eval_accuracy/val', avg_val_acc, global_step=e)
