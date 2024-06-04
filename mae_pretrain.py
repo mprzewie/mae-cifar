@@ -67,7 +67,8 @@ if __name__ == '__main__':
 
             # umae
             norm_features =  torch.nn.functional.normalize(cls_features)
-            sim = features @ features.T
+
+            sim = norm_features @ norm_features.T
             loss_umae = sim.pow(2).mean()
             ####
 
@@ -87,7 +88,8 @@ if __name__ == '__main__':
         for k, v in metrics.items():
             writer.add_scalar(f"train/{k}", np.mean(v), global_step=e)
         writer.add_scalar("train/epoch", e, global_step=e)
-        writer.add_scalar("train/lr", lr_scheduler.get_lr(), global_step=e)
+                
+        writer.add_scalar("train/lr", lr_scheduler.get_lr()[-1], global_step=e)
         # writer.add_scalar("train/loss_total", loss.item(), global_step=e)
         lr_scheduler.step()
         # avg_loss = sum(losses) / len(losses)
@@ -112,7 +114,6 @@ if __name__ == '__main__':
         ckpt = {
             "model": model.state_dict(),
             "epoch": e,
-            "lr": lr_scheduler.get_lr(),
             "metrics": {k: np.mean(v) for k,v in metrics.items()}
 
         }
