@@ -29,7 +29,7 @@ if __name__ == '__main__':
 
     setup_seed(args.seed)
 
-    maybe_setup_wandb(logdir=args.logdir, args=args)
+    maybe_setup_wandb(logdir=args.logdir, args=args, job_type=("linprobe" if args.linprobe else "finetune"))
 
 
     batch_size = args.batch_size
