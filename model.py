@@ -7,6 +7,8 @@ from einops.layers.torch import Rearrange
 
 from timm.models.layers import trunc_normal_
 from timm.models.vision_transformer import Block
+from torch import nn
+
 
 def random_indexes(size : int):
     forward_indexes = np.arange(size)
@@ -84,15 +86,16 @@ class MAE_Decoder(torch.nn.Module):
                  emb_dim=192,
                  num_layer=4,
                  num_head=3,
+                 out_size: int = None
                  ) -> None:
         super().__init__()
-
+        out_size = out_size or 3 * patch_size ** 2
         self.mask_token = torch.nn.Parameter(torch.zeros(1, 1, emb_dim))
         self.pos_embedding = torch.nn.Parameter(torch.zeros((image_size // patch_size) ** 2 + 1, 1, emb_dim))
 
         self.transformer = torch.nn.Sequential(*[Block(emb_dim, num_head) for _ in range(num_layer)])
 
-        self.head = torch.nn.Linear(emb_dim, 3 * patch_size ** 2)
+        self.head = torch.nn.Linear(emb_dim, out_size)
         self.patch2img = Rearrange('(h w) b (c p1 p2) -> b c (h p1) (w p2)', p1=patch_size, p2=patch_size, h=image_size//patch_size)
 
         self.init_weight()
@@ -103,10 +106,15 @@ class MAE_Decoder(torch.nn.Module):
 
     def forward(self, features, backward_indexes):
         T = features.shape[0]
+        # print("ft", features.shape, backward_indexes.shape)
         backward_indexes = torch.cat([torch.zeros(1, backward_indexes.shape[1]).to(backward_indexes), backward_indexes + 1], dim=0)
+        # print("bi", backward_indexes.shape)
         features = torch.cat([features, self.mask_token.expand(backward_indexes.shape[0] - features.shape[0], features.shape[1], -1)], dim=0)
+        # print("ft2", features.shape)
         features = take_indexes(features, backward_indexes)
+        # print("ft3", features.shape)
         features = features + self.pos_embedding
+        # print("ft4", features.shape, self.pos_embedding.shape)
 
         features = rearrange(features, 't b c -> b t c')
         features = self.transformer(features)
@@ -116,10 +124,10 @@ class MAE_Decoder(torch.nn.Module):
         patches = self.head(features)
         mask = torch.zeros_like(patches)
         mask[T-1:] = 1
+        # print("ptch", patches.shape, T)
         mask = take_indexes(mask, backward_indexes[1:] - 1)
         img = self.patch2img(patches)
         mask = self.patch2img(mask)
-
         return img, mask
 
 class MAE_ViT(torch.nn.Module):
@@ -136,12 +144,28 @@ class MAE_ViT(torch.nn.Module):
         super().__init__()
 
         self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
-        self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head)
+        self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=3 * patch_size ** 2)
+        self.l_decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=emb_dim)
+        self.l_decoder.patch2img = nn.Identity()
 
+    # def forward_l_decoder(self):
     def forward(self, img):
         features, backward_indexes = self.encoder(img)
+        # T, B, D
         predicted_img, mask = self.decoder(features,  backward_indexes)
-        return predicted_img, mask, features
+
+
+        ## predicting encoder features
+        cls_features = features[:1]
+        mask_features = self.l_decoder.mask_token.expand(features.shape[0]-1, features.shape[1], -1)
+        l_features = torch.cat([cls_features, mask_features], dim=0)
+        l_pred, _ = self.l_decoder(l_features, backward_indexes)
+        forward_indices = torch.argsort(backward_indexes, dim=0)
+
+        l_pos_features = take_indexes(l_pred, forward_indices)
+        l_pos_features = l_pos_features[:(l_features.shape[0] - 1)]
+
+        return predicted_img, mask, features, l_pos_features
 
 class ViT_Classifier(torch.nn.Module):
     def __init__(self, encoder : MAE_Encoder, num_classes=10, linprobe:bool=False) -> None:

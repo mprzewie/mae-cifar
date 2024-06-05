@@ -26,6 +26,7 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_epoch', type=int, default=200)
     parser.add_argument("--logdir", type=Path)
     parser.add_argument("--umae_lambda", type=float, default=0)
+    parser.add_argument("--latent_lambda", type=float, default=0)
 
     args = parser.parse_args()
 
@@ -61,7 +62,7 @@ if __name__ == '__main__':
         for img, label in tqdm(iter(dataloader), desc=f"Pretrain: {e}"):
             step_count += 1
             img = img.to(device)
-            predicted_img, mask, features = model(img)
+            predicted_img, mask, features, l_decoder_features = model(img)
 
             cls_features = features[0]
 
@@ -71,10 +72,13 @@ if __name__ == '__main__':
             sim = norm_features @ norm_features.T
             loss_umae = sim.pow(2).mean()
             ####
+            # latent decoder
+            loss_latent_decoder = ((features[1:] - l_decoder_features) ** 2).mean()
+            ####
 
             loss_mae = torch.mean((predicted_img - img) ** 2 * mask) / args.mask_ratio
 
-            loss = loss_mae + args.umae_lambda * loss_umae
+            loss = loss_mae + (args.umae_lambda * loss_umae) + (args.latent_lambda * loss_latent_decoder)
 
             loss.backward()
             if step_count % steps_per_update == 0:
@@ -84,6 +88,7 @@ if __name__ == '__main__':
             metrics["loss_total"].append(loss.item())
             metrics["loss_mae"].append(loss_mae.item())
             metrics["loss_umae"].append(loss_umae.item())
+            metrics["loss_latent"].append(loss_latent_decoder.item())
 
         for k, v in metrics.items():
             writer.add_scalar(f"train/{k}", np.mean(v), global_step=e)
