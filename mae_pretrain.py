@@ -27,6 +27,7 @@ if __name__ == '__main__':
     parser.add_argument("--logdir", type=Path)
     parser.add_argument("--umae_lambda", type=float, default=0)
     parser.add_argument("--latent_lambda", type=float, default=0)
+    parser.add_argument("--latent_loss_detach_targets", "-lldt", type=bool, action="store_true")
 
     args = parser.parse_args()
 
@@ -73,6 +74,9 @@ if __name__ == '__main__':
             loss_umae = sim.pow(2).mean()
             ####
             # latent decoder
+            target_features = features[1:]
+            if args.latent_loss_detach_targets:
+                target_features = target_features.detach()
             loss_latent_decoder = ((features[1:] - l_decoder_features) ** 2).mean()
             ####
 
