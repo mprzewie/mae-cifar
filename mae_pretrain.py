@@ -27,7 +27,7 @@ if __name__ == '__main__':
     parser.add_argument("--logdir", type=Path)
     parser.add_argument("--umae_lambda", type=float, default=0)
     parser.add_argument("--latent_lambda", type=float, default=0)
-    parser.add_argument("--latent_loss_detach_targets", "-lldt", type=bool, action="store_true")
+    parser.add_argument("--latent_loss_detach_targets", "-lldt", action="store_true", default=False)
 
     args = parser.parse_args()
 
