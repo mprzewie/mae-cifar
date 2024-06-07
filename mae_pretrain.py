@@ -21,7 +21,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_device_batch_size', type=int, default=512)
     parser.add_argument('--base_learning_rate', type=float, default=1.5e-4)
     parser.add_argument('--weight_decay', type=float, default=0.05)
-    parser.add_argument('--mask_ratio', type=float, default=0.75)
+    parser.add_argument('--mask_ratio_student', '--mask_ratio', '-mrs', type=float, default=0.75)
+    parser.add_argument('--mask_ratio_teacher', '-mrt', type=float, default=-1)
     parser.add_argument('--total_epoch', type=int, default=2000)
     parser.add_argument('--warmup_epoch', type=int, default=200)
     parser.add_argument("--logdir", type=Path)
@@ -49,7 +50,8 @@ if __name__ == '__main__':
     writer = SummaryWriter(args.logdir)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    model = MAE_ViT(mask_ratio=args.mask_ratio).to(device)
+    model = MAE_ViT(
+        mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher).to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=args.base_learning_rate * args.batch_size / 256, betas=(0.9, 0.95), weight_decay=args.weight_decay)
     lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8), 0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func, verbose=True)
@@ -69,7 +71,6 @@ if __name__ == '__main__':
 
             # umae
             norm_features =  torch.nn.functional.normalize(cls_features)
-
             sim = norm_features @ norm_features.T
             loss_umae = sim.pow(2).mean()
             ####
@@ -80,7 +81,7 @@ if __name__ == '__main__':
             loss_latent_decoder = ((features[1:] - l_decoder_features) ** 2).mean()
             ####
 
-            loss_mae = torch.mean((predicted_img - img) ** 2 * mask) / args.mask_ratio
+            loss_mae = torch.mean((predicted_img - img) ** 2 * mask) / args.mask_ratio_student
 
             loss = loss_mae + (args.umae_lambda * loss_umae) + (args.latent_lambda * loss_latent_decoder)
 
