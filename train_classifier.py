@@ -22,8 +22,8 @@ if __name__ == '__main__':
     parser.add_argument('--total_epoch', type=int, default=100)
     parser.add_argument('--warmup_epoch', type=int, default=5)
     parser.add_argument('--logdir', type=Path)
-    # parser.add_argument('--output_model_path', type=str, default='vit-t-classifier-from_scratch.pt')
     parser.add_argument("--linprobe", action="store_true")
+    parser.add_argument("--arch", type=str, default="vit_tiny", choices=["vit_tiny", "vit_base"])
 
     args = parser.parse_args()
 
@@ -44,8 +44,9 @@ if __name__ == '__main__':
     val_dataloader = torch.utils.data.DataLoader(val_dataset, load_batch_size, shuffle=False, num_workers=4)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    model = MAE_ViT()
-    ckpt = torch.load(args.logdir / "vit-t-mae.pt", map_location='cpu')
+    vit_kwargs = VIT_KWARGS[args.arch]
+    model = MAE_ViT(**vit_kwargs)
+    ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')
     model.load_state_dict(ckpt["model"])
     writer = SummaryWriter(args.logdir)
     model = ViT_Classifier(model.encoder, num_classes=10, linprobe=False).to(device)

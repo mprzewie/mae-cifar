@@ -9,6 +9,22 @@ from timm.models.layers import trunc_normal_
 from timm.models.vision_transformer import Block
 from torch import nn
 
+VIT_KWARGS = dict(
+    vit_tiny=dict(
+        emb_dim=192,
+        encoder_layer=12,
+        encoder_head=3,
+        decoder_layer=4,
+        decoder_head=3,
+    ),
+    vit_base=dict(
+        emb_dim=768,
+        encoder_layer=12,
+        encoder_head=12,
+        decoder_layer=8,
+        decoder_head=16,
+    )
+)
 
 def random_indexes(size : int):
     forward_indexes = np.arange(size)

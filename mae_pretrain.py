@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import ToTensor, Compose, Normalize
 from tqdm import tqdm
 
-from model import *
+from model import MAE_ViT, VIT_KWARGS
 from utils import setup_seed, maybe_setup_wandb
 
 if __name__ == '__main__':
@@ -29,6 +29,7 @@ if __name__ == '__main__':
     parser.add_argument("--umae_lambda", type=float, default=0)
     parser.add_argument("--latent_lambda", type=float, default=0)
     parser.add_argument("--latent_loss_detach_targets", "-lldt", action="store_true", default=False)
+    parser.add_argument("--arch", type=str, default="vit_tiny", choices=["vit_tiny", "vit_base"])
 
     args = parser.parse_args()
 
@@ -50,8 +51,11 @@ if __name__ == '__main__':
     writer = SummaryWriter(args.logdir)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+    vit_kwargs = VIT_KWARGS[args.arch]
     model = MAE_ViT(
-        mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher).to(device)
+        mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher,
+        **vit_kwargs
+    ).to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=args.base_learning_rate * args.batch_size / 256, betas=(0.9, 0.95), weight_decay=args.weight_decay)
     lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8), 0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func, verbose=True)
@@ -127,4 +131,4 @@ if __name__ == '__main__':
             "metrics": {k: np.mean(v) for k,v in metrics.items()}
 
         }
-        torch.save(ckpt, args.logdir / "vit-t-mae.pt")
+        torch.save(ckpt, args.logdir / f"{args.arch}-mae.pt")
