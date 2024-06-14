@@ -8,7 +8,8 @@ import numpy as np
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms import ToTensor, Compose, Normalize
+from torchvision.datasets import ImageFolder
+from torchvision.transforms import ToTensor, Compose, Normalize, transforms
 from tqdm import tqdm
 
 from model import MAE_ViT, VIT_KWARGS
@@ -30,6 +31,7 @@ if __name__ == '__main__':
     parser.add_argument("--latent_lambda", type=float, default=0)
     parser.add_argument("--latent_loss_detach_targets", "-lldt", action="store_true", default=False)
     parser.add_argument("--arch", type=str, default="vit_tiny", choices=["vit_tiny", "vit_base"])
+    parser.add_argument("--ds", default="cifar10", type=str)
 
     args = parser.parse_args()
 
@@ -45,8 +47,31 @@ if __name__ == '__main__':
     assert batch_size % load_batch_size == 0
     steps_per_update = batch_size // load_batch_size
 
-    train_dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
-    val_dataset = torchvision.datasets.CIFAR10('data', train=False, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
+    if args.ds == "cifar":
+        train_dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
+        val_dataset = torchvision.datasets.CIFAR10('data', train=False, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
+        imsize_kwargs = dict(
+            image_size=32,
+            patch_size=2,
+        )
+    else:
+        transform_train = transforms.Compose([
+            transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+        transform_val = transforms.Compose([
+            transforms.Resize(256, interpolation=3),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+        train_dataset = ImageFolder(os.path.join(args.ds, 'train'), transform=transform_train)
+        val_dataset = ImageFolder(os.path.join(args.ds, 'val'), transform=transform_val)
+        imsize_kwargs = dict(
+            image_size=244,
+            patch_size=16,
+        )
+
     dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=8)
     writer = SummaryWriter(args.logdir)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -54,8 +79,10 @@ if __name__ == '__main__':
     vit_kwargs = VIT_KWARGS[args.arch]
     model = MAE_ViT(
         mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher,
-        **vit_kwargs
+        **vit_kwargs,
+        **imsize_kwargs
     ).to(device)
+
     optim = torch.optim.AdamW(model.parameters(), lr=args.base_learning_rate * args.batch_size / 256, betas=(0.9, 0.95), weight_decay=args.weight_decay)
     lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8), 0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func, verbose=True)
