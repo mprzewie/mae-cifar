@@ -46,8 +46,8 @@ if __name__ == '__main__':
 
     assert batch_size % load_batch_size == 0
     steps_per_update = batch_size // load_batch_size
-
-    if args.ds == "cifar":
+    
+    if args.ds == "cifar10":
         train_dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
         val_dataset = torchvision.datasets.CIFAR10('data', train=False, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
         imsize_kwargs = dict(
@@ -56,7 +56,7 @@ if __name__ == '__main__':
         )
     else:
         transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+            transforms.RandomResizedCrop(224, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
