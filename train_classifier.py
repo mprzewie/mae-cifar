@@ -73,7 +73,10 @@ if __name__ == '__main__':
     ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')
     model.load_state_dict(ckpt["model"])
     writer = SummaryWriter(args.logdir)
-    model = ViT_Classifier(model.encoder, num_classes=10, linprobe=False).to(device)
+    model = ViT_Classifier(
+        model.encoder, num_classes=(10 if args.ds=="cifar10" else 1000),
+        linprobe=args.linprobe
+    ).to(device)
 
     loss_fn = torch.nn.CrossEntropyLoss()
     acc_fn = lambda logit, label: torch.mean((logit.argmax(dim=-1) == label).float())
