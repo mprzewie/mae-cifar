@@ -61,7 +61,7 @@ if __name__ == '__main__':
         train_dataset = ImageFolder(os.path.join(args.ds, 'train'), transform=transform_train)
         val_dataset = ImageFolder(os.path.join(args.ds, 'val'), transform=transform_val)
         imsize_kwargs = dict(
-            image_size=244,
+            image_size=224,
             patch_size=16,
         )
     train_dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4)
