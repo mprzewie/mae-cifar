@@ -52,6 +52,26 @@ class PatchShuffle(torch.nn.Module):
 
         return patches, forward_indexes, backward_indexes
 
+
+class AttnBlock(Block):
+    def forward(self, x: torch.Tensor, return_attn: bool = False) -> torch.Tensor:
+        x_blk = super().forward(x)
+        if return_attn:
+            a = self.attn
+            x = self.norm1(x)
+
+            B, N, C = x.shape
+            qkv = a.qkv(x).reshape(B, N, 3, a.num_heads, a.head_dim).permute(2, 0, 3, 1, 4)
+            q, k, v = qkv.unbind(0)
+            q, k = a.q_norm(q), a.k_norm(k)
+            q = q * a.scale
+            attn = q @ k.transpose(-2, -1)
+            attn = attn.softmax(dim=-1)
+            attn = a.attn_drop(attn)
+            return x_blk, attn
+
+        return x_blk
+
 class MAE_Encoder(torch.nn.Module):
     def __init__(self,
                  image_size=32,
@@ -70,7 +90,7 @@ class MAE_Encoder(torch.nn.Module):
 
         self.patchify = torch.nn.Conv2d(3, emb_dim, patch_size, patch_size)
 
-        self.transformer = torch.nn.Sequential(*[Block(emb_dim, num_head) for _ in range(num_layer)])
+        self.transformer = torch.nn.Sequential(*[AttnBlock(emb_dim, num_head) for _ in range(num_layer)])
 
         self.layer_norm = torch.nn.LayerNorm(emb_dim)
 
@@ -80,7 +100,7 @@ class MAE_Encoder(torch.nn.Module):
         trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embedding, std=.02)
 
-    def forward(self, img, mask_ratio: float):
+    def forward(self, img, mask_ratio: float, return_attn_masks: bool =False):
         patches = self.patchify(img)
         patches = rearrange(patches, 'b c h w -> (h w) b c')
         patches = patches + self.pos_embedding
@@ -89,7 +109,23 @@ class MAE_Encoder(torch.nn.Module):
 
         patches = torch.cat([self.cls_token.expand(-1, patches.shape[1], -1), patches], dim=0)
         patches = rearrange(patches, 't b c -> b t c')
-        features = self.layer_norm(self.transformer(patches))
+
+        x_ = patches
+        trans = self.transformer(patches)
+
+        if return_attn_masks:
+            attns = []
+            for blk in self.transformer:
+                x_, attn = blk(x_, return_attn=True)
+                attns.append(attn)
+
+            attns = torch.stack(attns)
+
+        assert torch.allclose(x_, trans)
+        assert False, attns.shape
+
+
+        features = self.layer_norm(trans)
         features = rearrange(features, 'b t c -> t b c')
 
 
