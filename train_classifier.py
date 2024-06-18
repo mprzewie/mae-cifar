@@ -83,7 +83,7 @@ if __name__ == '__main__':
     model.load_state_dict(ckpt["model"])
     writer = SummaryWriter(args.logdir)
     model = ViT_Classifier(
-        model.encoder, num_classes=(10 if args.ds=="cifar10" else 1000),
+        model.encoder, num_classes=(10 if args.ds=="cifar10" else 100 if args.ds=="cifar100" else 1000),
         linprobe=args.linprobe
     ).to(device)
 
