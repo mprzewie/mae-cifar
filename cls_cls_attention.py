@@ -83,12 +83,12 @@ if __name__ == '__main__':
     model.load_state_dict(ckpt["model"])
     writer = SummaryWriter(args.logdir)
 
-    model = model.encoder
+    model = model.encoder.to(device)
 
     for img, label in tqdm(iter(val_dataloader)):
         img = img.to(device)
         label = label.to(device)
-        logits = model(img, return_attn_masks = True)
+        logits = model(img, return_attn_masks = True, mask_ratio=0)
 
         assert False, logits.shape
 
