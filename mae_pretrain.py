@@ -54,6 +54,15 @@ if __name__ == '__main__':
             image_size=32,
             patch_size=2,
         )
+    elif args.ds == "cifar100":
+        train_dataset = torchvision.datasets.CIFAR100('data', train=True, download=True,
+                                                     transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
+        val_dataset = torchvision.datasets.CIFAR100('data', train=False, download=True,
+                                                   transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
+        imsize_kwargs = dict(
+            image_size=32,
+            patch_size=2,
+        )
     else:
         transform_train = transforms.Compose([
             transforms.RandomResizedCrop(224, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
