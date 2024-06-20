@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torchvision
-from functorch.einops import rearrange
+from einops import repeat, rearrange
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.datasets import ImageFolder, STL10
 from torchvision.transforms import ToTensor, Compose, Normalize, transforms
@@ -80,8 +80,8 @@ if __name__ == '__main__':
             transforms.ToTensor(),
             transforms.Normalize(mean=mean, std=std,)
         ])
-        train_dataset = STL10("data", split='train+unlabeled', transform=transform_train, download=True)
-        val_dataset = STL10("data", split='test', transform=transform_train, download=True)
+        train_dataset = STL10("/shared/sets/datasets/vision/stl10", split='train+unlabeled', transform=transform_train, download=True)
+        val_dataset = STL10("/shared/sets/datasets/vision/stl10", split='test', transform=transform_train, download=True)
         imsize_kwargs = dict(
             image_size=96,
             patch_size=6,
@@ -172,6 +172,8 @@ if __name__ == '__main__':
         if e % 10 == 0:
             print(e, {k: np.mean(v) for k,v in metrics.items()})
 
+        ''' visualize the first 16 predicted images on val dataset'''
+        model.eval()
         if e % (args.total_epoch // 20) == 0:
             with torch.no_grad():
                 val_img = torch.stack([val_dataset[i][0] for i in range(16)])
