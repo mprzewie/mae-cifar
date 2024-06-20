@@ -171,19 +171,17 @@ if __name__ == '__main__':
         # writer.add_scalar('train_loss_mae', avg_loss, global_step=e)
         if e % 10 == 0:
             print(e, {k: np.mean(v) for k,v in metrics.items()})
-        # print(f'In epoch {e}, average traning loss is {avg_loss}.')
 
-        ''' visualize the first 16 predicted images on val dataset'''
-        model.eval()
+        if e % (args.total_epoch // 20) == 0:
+            with torch.no_grad():
+                val_img = torch.stack([val_dataset[i][0] for i in range(16)])
+                val_img = val_img.to(device)
+                predicted_val_img, mask, features, l_decoder_features = model(val_img)
+                predicted_val_img = predicted_val_img * mask + val_img * (1 - mask)
+                img = torch.cat([val_img * (1 - mask), predicted_val_img, val_img], dim=0)
+                img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=3)
+                writer.add_image('train/mae_image', (img + 1) / 2, global_step=e)
 
-        with torch.no_grad():
-            val_img = torch.stack([val_dataset[i][0] for i in range(16)])
-            val_img = val_img.to(device)
-            redicted_img, mask, features, l_decoder_features = model(val_img)
-            predicted_val_img = predicted_val_img * mask + val_img * (1 - mask)
-            img = torch.cat([val_img * (1 - mask), predicted_val_img, val_img], dim=0)
-            img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=3)
-            writer.add_image('train/mae_image', (img + 1) / 2, global_step=e)
         
         ''' save model '''
         ckpt = {
@@ -193,3 +191,4 @@ if __name__ == '__main__':
 
         }
         torch.save(ckpt, args.logdir / f"{args.arch}-mae.pt")
+
