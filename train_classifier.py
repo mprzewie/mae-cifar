@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.datasets import ImageFolder
+from torchvision.datasets import ImageFolder, STL10
 from torchvision.transforms import ToTensor, Compose, Normalize, transforms
 from tqdm import tqdm
 
@@ -55,6 +55,27 @@ if __name__ == '__main__':
         imsize_kwargs = dict(
             image_size=32,
             patch_size=2,
+        )
+    elif args.ds == "stl10":
+        mean = torch.tensor([0.43, 0.42, 0.39])
+        std = torch.tensor([0.27, 0.26, 0.27])
+
+        transform_train = transforms.Compose([
+            transforms.RandomResizedCrop(96, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=mean, std=std,)
+        ])
+        transform_val = transforms.Compose([
+            transforms.Resize(96, interpolation=3),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=mean, std=std,)
+        ])
+        train_dataset = STL10("data", split='train', transform=transform_train, download=True)
+        val_dataset = STL10("data", split='test', transform=transform_train, download=True)
+        imsize_kwargs = dict(
+            image_size=96,
+            patch_size=6,
         )
     else:
         transform_train = transforms.Compose([
