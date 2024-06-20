@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torchvision
-from functorch.einops import rearrange
+from einops import repeat, rearrange
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.datasets import ImageFolder, STL10
 from torchvision.transforms import ToTensor, Compose, Normalize, transforms
@@ -80,8 +80,8 @@ if __name__ == '__main__':
             transforms.ToTensor(),
             transforms.Normalize(mean=mean, std=std,)
         ])
-        train_dataset = STL10("data", split='train+unlabeled', transform=transform_train, download=True)
-        val_dataset = STL10("data", split='test', transform=transform_train, download=True)
+        train_dataset = STL10("/shared/sets/datasets/vision/stl10", split='train+unlabeled', transform=transform_train, download=True)
+        val_dataset = STL10("/shared/sets/datasets/vision/stl10", split='test', transform=transform_train, download=True)
         imsize_kwargs = dict(
             image_size=96,
             patch_size=6,
@@ -182,7 +182,10 @@ if __name__ == '__main__':
             predicted_val_img, mask = model(val_img)
             predicted_val_img = predicted_val_img * mask + val_img * (1 - mask)
             img = torch.cat([val_img * (1 - mask), predicted_val_img, val_img], dim=0)
+            
             img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=3)
+            
+            
             writer.add_image('train/mae_image', (img + 1) / 2, global_step=e)
         
         ''' save model '''
