@@ -179,7 +179,7 @@ if __name__ == '__main__':
         with torch.no_grad():
             val_img = torch.stack([val_dataset[i][0] for i in range(16)])
             val_img = val_img.to(device)
-            predicted_val_img, mask = model(val_img)
+            redicted_img, mask, features, l_decoder_features = model(val_img)
             predicted_val_img = predicted_val_img * mask + val_img * (1 - mask)
             img = torch.cat([val_img * (1 - mask), predicted_val_img, val_img], dim=0)
             
