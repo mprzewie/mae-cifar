@@ -13,6 +13,7 @@ from torchvision.datasets import ImageFolder, STL10
 from torchvision.transforms import ToTensor, Compose, Normalize, transforms
 from tqdm import tqdm
 
+from datasets import get_datasets
 from model import MAE_ViT, VIT_KWARGS
 from utils import setup_seed, maybe_setup_wandb
 import torchvision.transforms as T
@@ -49,62 +50,7 @@ if __name__ == '__main__':
     assert batch_size % load_batch_size == 0
     steps_per_update = batch_size // load_batch_size
     
-    if args.ds == "cifar10":
-        train_dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
-        val_dataset = torchvision.datasets.CIFAR10('data', train=False, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
-        imsize_kwargs = dict(
-            image_size=32,
-            patch_size=2,
-        )
-    elif args.ds == "cifar100":
-        train_dataset = torchvision.datasets.CIFAR100('data', train=True, download=True,
-                                                     transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
-        val_dataset = torchvision.datasets.CIFAR100('data', train=False, download=True,
-                                                   transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
-        imsize_kwargs = dict(
-            image_size=32,
-            patch_size=2,
-        )
-    elif args.ds == "stl10":
-        mean = torch.tensor([0.43, 0.42, 0.39])
-        std = torch.tensor([0.27, 0.26, 0.27])
-
-        transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(96, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std,)
-        ])
-        transform_val = transforms.Compose([
-            transforms.Resize(96, interpolation=3),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std,)
-        ])
-        train_dataset = STL10("/shared/sets/datasets/vision/stl10", split='train+unlabeled', transform=transform_train, download=True)
-        val_dataset = STL10("/shared/sets/datasets/vision/stl10", split='test', transform=transform_train, download=True)
-        imsize_kwargs = dict(
-            image_size=96,
-            patch_size=6,
-        )
-
-
-    else:
-        transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-        transform_val = transforms.Compose([
-            transforms.Resize(256, interpolation=3),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-        train_dataset = ImageFolder(os.path.join(args.ds, 'train'), transform=transform_train)
-        val_dataset = ImageFolder(os.path.join(args.ds, 'val'), transform=transform_val)
-        imsize_kwargs = dict(
-            image_size=224,
-            patch_size=16,
-        )
+    train_dataset, val_dataset, imsize_kwargs = get_datasets(args, stl_train_ctx="train")
 
     dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=8)
     writer = SummaryWriter(args.logdir)
