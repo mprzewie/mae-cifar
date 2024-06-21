@@ -35,6 +35,8 @@ if __name__ == '__main__':
     parser.add_argument("--latent_loss_detach_targets", "-lldt", action="store_true", default=False)
     parser.add_argument("--arch", type=str, default="vit_tiny", choices=["vit_tiny", "vit_base"])
     parser.add_argument("--ds", default="cifar10", type=str)
+    parser.add_argument("--distill_teacher_path", type=Path, default=None)
+    parser.add_argument("--distill_lambda", type=float, default=0)
 
     args = parser.parse_args()
 
@@ -62,6 +64,18 @@ if __name__ == '__main__':
         **vit_kwargs,
         **imsize_kwargs
     ).to(device)
+    teacher = None
+
+    if args.distill_teacher_path is not None:
+        teacher = MAE_ViT(
+            mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher,
+            **vit_kwargs,
+            **imsize_kwargs
+        ).to(device)
+
+        ckpt = torch.load(args.distill_teacher_path)
+        model.load_state_dict(ckpt["model"], strict=False)
+        teacher.load_state_dict(ckpt["model"], strict=False)
 
     optim = torch.optim.AdamW(model.parameters(), lr=args.base_learning_rate * args.batch_size / 256, betas=(0.9, 0.95), weight_decay=args.weight_decay)
     lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8), 0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
@@ -76,7 +90,7 @@ if __name__ == '__main__':
         for img, label in tqdm(iter(dataloader), desc=f"Pretrain: {e}"):
             step_count += 1
             img = img.to(device)
-            predicted_img, mask, features, l_decoder_features = model(img)
+            predicted_img, mask, features, l_decoder_features, (fi, bi) = model(img)
 
             cls_features = features[0]
 
@@ -92,9 +106,16 @@ if __name__ == '__main__':
             loss_latent_decoder = ((features[1:] - l_decoder_features) ** 2).mean()
             ####
 
+            loss_distill = torch.tensor(0)
+            if teacher is not None:
+                tfeatures, tfi, tbi = teacher.encoder(img, mask_ratio=teacher.mask_ratio_student, forward_indexes=fi, backward_indexes=bi)
+                assert torch.equal(fi, tfi)
+                assert torch.equal(bi, tbi)
+                loss_distill = torch.mean((tfeatures[1:] - features[1:]) ** 2)
+
             loss_mae = torch.mean((predicted_img - img) ** 2 * mask) / args.mask_ratio_student
 
-            loss = loss_mae + (args.umae_lambda * loss_umae) + (args.latent_lambda * loss_latent_decoder)
+            loss = loss_mae + (args.umae_lambda * loss_umae) + (args.latent_lambda * loss_latent_decoder) + (args.distill_lambda + loss_distill)
 
             loss.backward()
             if step_count % steps_per_update == 0:
@@ -105,6 +126,7 @@ if __name__ == '__main__':
             metrics["loss_mae"].append(loss_mae.item())
             metrics["loss_umae"].append(loss_umae.item())
             metrics["loss_latent"].append(loss_latent_decoder.item())
+            metrics["loss_distill"].append(loss_distill.item())
 
         for k, v in metrics.items():
             writer.add_scalar(f"train/{k}", np.mean(v), global_step=e)

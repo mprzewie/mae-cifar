@@ -37,15 +37,18 @@ def take_indexes(sequences, indexes):
 
 class PatchShuffle(torch.nn.Module):
 
-    def forward(self, patches : torch.Tensor, mask_ratio: float):
+    def forward(self, patches: torch.Tensor, mask_ratio: float, forward_indexes = None, backward_indexes = None):
         T, B, C = patches.shape
         remain_T = int(T * (1 - mask_ratio))
 
         # remain_T = int(T * (1 - self.ratio))
 
-        indexes = [random_indexes(T) for _ in range(B)]
-        forward_indexes = torch.as_tensor(np.stack([i[0] for i in indexes], axis=-1), dtype=torch.long).to(patches.device)
-        backward_indexes = torch.as_tensor(np.stack([i[1] for i in indexes], axis=-1), dtype=torch.long).to(patches.device)
+        if forward_indexes is not None:
+            assert backward_indexes is not None
+        else:
+            indexes = [random_indexes(T) for _ in range(B)]
+            forward_indexes = torch.as_tensor(np.stack([i[0] for i in indexes], axis=-1), dtype=torch.long).to(patches.device)
+            backward_indexes = torch.as_tensor(np.stack([i[1] for i in indexes], axis=-1), dtype=torch.long).to(patches.device)
 
         patches = take_indexes(patches, forward_indexes)
         patches = patches[:remain_T]
@@ -100,12 +103,12 @@ class MAE_Encoder(torch.nn.Module):
         trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embedding, std=.02)
 
-    def forward(self, img, mask_ratio: float, return_attn_masks: bool =False):
+    def forward(self, img, mask_ratio: float, return_attn_masks: bool =False, *, forward_indexes = None, backward_indexes = None):
         patches = self.patchify(img)
         patches = rearrange(patches, 'b c h w -> (h w) b c')
         patches = patches + self.pos_embedding
 
-        patches, forward_indexes, backward_indexes = self.shuffle(patches, mask_ratio=mask_ratio)
+        patches, forward_indexes, backward_indexes = self.shuffle(patches, mask_ratio=mask_ratio, forward_indexes=forward_indexes, backward_indexes=backward_indexes)
 
         patches = torch.cat([self.cls_token.expand(-1, patches.shape[1], -1), patches], dim=0)
         patches = rearrange(patches, 't b c -> b t c')
@@ -122,16 +125,15 @@ class MAE_Encoder(torch.nn.Module):
             attns = torch.stack(attns, dim=1)
 
             assert torch.allclose(x_, trans)
-        # assert False, attns.shape
 
 
         features = self.layer_norm(trans)
         features = rearrange(features, 'b t c -> t b c')
 
         if return_attn_masks:
-            return features, backward_indexes, attns
+            return features, forward_indexes, backward_indexes, attns
 
-        return features, backward_indexes
+        return features, forward_indexes, backward_indexes
 
 class MAE_Decoder(torch.nn.Module):
     def __init__(self,
@@ -203,11 +205,14 @@ class MAE_ViT(torch.nn.Module):
 
 
     # def forward_l_decoder(self):
-    def forward(self, img):
-        features, backward_indexes = self.encoder(img, mask_ratio=self.mask_ratio_student)
+    def forward(self, img, *, forward_indexes = None, backward_indexes = None):
+        features, forward_indexes, backward_indexes = self.encoder(
+            img, mask_ratio=self.mask_ratio_student,
+            forward_indexes=forward_indexes, backward_indexes=backward_indexes
+        )
 
         if self.mask_ratio_teacher >= 0:
-            full_features, _ = self.encoder(img, mask_ratio=self.mask_ratio_teacher)
+            full_features, _, _ = self.encoder(img, mask_ratio=self.mask_ratio_teacher)
             part_features= features
             full_cls_features = full_features[:1]
             mask_patch_features = part_features[1:]
@@ -221,13 +226,12 @@ class MAE_ViT(torch.nn.Module):
         mask_features = self.l_decoder.mask_token.expand(features.shape[0]-1, features.shape[1], -1)
         l_features = torch.cat([cls_features, mask_features], dim=0)
         l_pred, _ = self.l_decoder(l_features, backward_indexes)
-        forward_indices = torch.argsort(backward_indexes, dim=0)
 
-        l_pos_features = take_indexes(l_pred, forward_indices)
+        l_pos_features = take_indexes(l_pred, forward_indexes)
         l_pos_features = l_pos_features[:(l_features.shape[0] - 1)]
         ###
 
-        return predicted_img, mask, features, l_pos_features
+        return predicted_img, mask, features, l_pos_features, (forward_indexes, backward_indexes)
 
 class ViT_Classifier(torch.nn.Module):
     def __init__(self, encoder : MAE_Encoder, num_classes=10, linprobe:bool=False) -> None:
