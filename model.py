@@ -119,15 +119,17 @@ class MAE_Encoder(torch.nn.Module):
                 x_, attn = blk(x_, return_attn=True)
                 attns.append(attn)
 
-            attns = torch.stack(attns)
+            attns = torch.stack(attns, dim=1)
 
-        assert torch.allclose(x_, trans)
-        assert False, attns.shape
+            assert torch.allclose(x_, trans)
+        # assert False, attns.shape
 
 
         features = self.layer_norm(trans)
         features = rearrange(features, 'b t c -> t b c')
 
+        if return_attn_masks:
+            return features, backward_indexes, attns
 
         return features, backward_indexes
 
