@@ -79,18 +79,32 @@ if __name__ == '__main__':
 
     vit_kwargs = VIT_KWARGS[args.arch]
     model = MAE_ViT(**vit_kwargs, **imsize_kwargs)
-    ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')
-    model.load_state_dict(ckpt["model"])
+    try:
+        ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')
+    except:
+        ckpt = torch.load(args.logdir / f"vit-t-mae.pt", map_location='cpu')
+
+    model.load_state_dict(ckpt["model"], strict=False)
     writer = SummaryWriter(args.logdir)
 
     model = model.encoder.to(device)
 
-    for img, label in tqdm(iter(val_dataloader)):
-        img = img.to(device)
-        label = label.to(device)
-        logits = model(img, return_attn_masks = True, mask_ratio=0)
+    cc_attns = []
+    with torch.no_grad():
+        for img, _ in tqdm(iter(val_dataloader)):
+            img = img.to(device)
+            _, _, attn = model(img, return_attn_masks = True, mask_ratio=0)
 
-        assert False, logits.shape
+            cc_attn = attn[:, :, :, 0, 0].cpu().numpy()
+            # B, L, H
+            cc_attns.append(cc_attn)
 
+    cc_attns = np.concatenate(cc_attns, axis=0)
 
+    cc_attns = cc_attns.mean(axis=(0,2))
+
+    for i, a in enumerate(cc_attns):
+        writer.add_scalar("eval_attention/cls_cls", a, global_step=i)
+
+    print(cc_attns)
 
