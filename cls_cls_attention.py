@@ -10,6 +10,7 @@ from torchvision.datasets import ImageFolder
 from torchvision.transforms import ToTensor, Compose, Normalize, transforms
 from tqdm import tqdm
 
+from datasets import get_datasets
 from model import *
 from utils import setup_seed, maybe_setup_wandb
 
@@ -40,39 +41,8 @@ if __name__ == '__main__':
     assert batch_size % load_batch_size == 0
     steps_per_update = batch_size // load_batch_size
 
-    if args.ds == "cifar10":
-        train_dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
-        val_dataset = torchvision.datasets.CIFAR10('data', train=False, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
-        imsize_kwargs = dict(
-            image_size=32,
-            patch_size=2,
-        )
-    elif args.ds == "cifar100":
-        train_dataset = torchvision.datasets.CIFAR100('data', train=True, download=True,
-                                                     transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
-        val_dataset = torchvision.datasets.CIFAR100('data', train=False, download=True,
-                                                   transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
-        imsize_kwargs = dict(
-            image_size=32,
-            patch_size=2,
-        )
-    else:
-        transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-        transform_val = transforms.Compose([
-            transforms.Resize(256, interpolation=3),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-        train_dataset = ImageFolder(os.path.join(args.ds, 'train'), transform=transform_train)
-        val_dataset = ImageFolder(os.path.join(args.ds, 'val'), transform=transform_val)
-        imsize_kwargs = dict(
-            image_size=224,
-            patch_size=16,
-        )
+    train_dataset, val_dataset, imsize_kwargs = get_datasets(args, stl_train_ctx="test")
+
     # train_dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, load_batch_size, shuffle=False, num_workers=4)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
