@@ -72,7 +72,7 @@ if __name__ == '__main__':
             transforms.Normalize(mean=mean, std=std,)
         ])
         train_dataset = STL10("data", split='train', transform=transform_train, download=True)
-        val_dataset = STL10("data", split='test', transform=transform_train, download=True)
+        val_dataset = STL10("data", split='test', transform=transform_val, download=True)
         imsize_kwargs = dict(
             image_size=96,
             patch_size=6,
