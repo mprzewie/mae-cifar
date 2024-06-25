@@ -103,7 +103,11 @@ class MAE_Encoder(torch.nn.Module):
         trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embedding, std=.02)
 
-    def forward(self, img, mask_ratio: float, return_attn_masks: bool =False, *, forward_indexes = None, backward_indexes = None):
+    def forward(
+            self, img, mask_ratio: float, return_attn_masks: bool =False, *,
+            forward_indexes = None, backward_indexes = None,
+            latent_loss_block: int = 11,
+    ):
         patches = self.patchify(img)
         patches = rearrange(patches, 'b c h w -> (h w) b c')
         patches = patches + self.pos_embedding
@@ -114,26 +118,33 @@ class MAE_Encoder(torch.nn.Module):
         patches = rearrange(patches, 't b c -> b t c')
 
         x_ = patches
-        trans = self.transformer(patches)
 
-        if return_attn_masks:
-            attns = []
-            for blk in self.transformer:
-                x_, attn = blk(x_, return_attn=True)
-                attns.append(attn)
 
-            attns = torch.stack(attns, dim=1)
+        # trans = self.transformer(patches)
 
-            assert torch.allclose(x_, trans)
+        latent_features = None
+        # if return_attn_masks:
+        attns = []
+        for bi, blk in enumerate(self.transformer):
 
+            x_, attn = blk(x_, return_attn=True)
+            attns.append(attn)
+            if bi == latent_loss_block:
+                latent_features = x_
+
+        attns = torch.stack(attns, dim=1)
+
+        trans = x_
+        assert latent_features is not None, f"{latent_loss_block=}, {len(self.transformer)=}"
 
         features = self.layer_norm(trans)
         features = rearrange(features, 'b t c -> t b c')
+        latent_features = rearrange(latent_features, 'b t c -> t b c')
 
         if return_attn_masks:
-            return features, forward_indexes, backward_indexes, attns
+            return features, latent_features, forward_indexes, backward_indexes, attns
 
-        return features, forward_indexes, backward_indexes
+        return features, latent_features, forward_indexes, backward_indexes
 
 class MAE_Decoder(torch.nn.Module):
     def __init__(self,
@@ -191,10 +202,13 @@ class MAE_ViT(torch.nn.Module):
                  decoder_head=3,
                  mask_ratio_student=0.75,
                  mask_ratio_teacher=-1,
+                 latent_loss_block: int = 11,
                  ) -> None:
         super().__init__()
 
         # self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
+        self.latent_loss_block = latent_loss_block
+
         self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head)
         self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=3 * patch_size ** 2)
         self.l_decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=emb_dim)
@@ -206,50 +220,68 @@ class MAE_ViT(torch.nn.Module):
 
     # def forward_l_decoder(self):
     def forward(self, img, *, forward_indexes = None, backward_indexes = None):
-        features, forward_indexes, backward_indexes = self.encoder(
+        features, latent_features, forward_indexes, backward_indexes = self.encoder.forward(
             img, mask_ratio=self.mask_ratio_student,
-            forward_indexes=forward_indexes, backward_indexes=backward_indexes
+            forward_indexes=forward_indexes, backward_indexes=backward_indexes,
+            latent_loss_block=self.latent_loss_block
         )
 
         if self.mask_ratio_teacher >= 0:
-            full_features, _, _ = self.encoder(img, mask_ratio=self.mask_ratio_teacher)
+            full_features, _, _, _ = self.encoder.forward(img, mask_ratio=self.mask_ratio_teacher)
             part_features= features
             full_cls_features = full_features[:1]
             mask_patch_features = part_features[1:]
             features = torch.cat([full_cls_features, mask_patch_features], dim=0)
 
-        predicted_img, mask = self.decoder(features,  backward_indexes)
+        predicted_img, mask = self.decoder.forward(features,  backward_indexes)
 
 
-        ## predicting encoder features
-        cls_features = features[:1]
-        mask_features = self.l_decoder.mask_token.expand(features.shape[0]-1, features.shape[1], -1)
+        cls_features = latent_features[:1]
+
+        mask_features = self.l_decoder.mask_token.expand(
+            latent_features.shape[0]-1, latent_features.shape[1], -1
+        )
         l_features = torch.cat([cls_features, mask_features], dim=0)
         l_pred, _ = self.l_decoder(l_features, backward_indexes)
-
         l_pos_features = take_indexes(l_pred, forward_indexes)
         l_pos_features = l_pos_features[:(l_features.shape[0] - 1)]
-        ###
 
         return predicted_img, mask, features, l_pos_features, (forward_indexes, backward_indexes)
 
 class ViT_Classifier(torch.nn.Module):
-    def __init__(self, encoder : MAE_Encoder, num_classes=10, linprobe:bool=False) -> None:
+    def __init__(self, encoder : MAE_Encoder, num_classes=10, linprobe:bool=False, num_last_blocks: int = 1) -> None:
         super().__init__()
         self.cls_token = encoder.cls_token
         self.pos_embedding = encoder.pos_embedding
         self.patchify = encoder.patchify
         self.transformer = encoder.transformer
         self.layer_norm = encoder.layer_norm
-        self.head = torch.nn.Linear(self.pos_embedding.shape[-1], num_classes)
+
+        self.head = torch.nn.Linear(
+            self.pos_embedding.shape[-1] * num_last_blocks, num_classes
+        )
         self.linprobe = linprobe
+        self.num_last_blocks = num_last_blocks
     def forward(self, img):
         patches = self.patchify(img)
         patches = rearrange(patches, 'b c h w -> (h w) b c')
         patches = patches + self.pos_embedding
         patches = torch.cat([self.cls_token.expand(-1, patches.shape[1], -1), patches], dim=0)
         patches = rearrange(patches, 't b c -> b t c')
-        features = self.layer_norm(self.transformer(patches))
+
+        if self.num_last_blocks == 1:
+            features = self.layer_norm(self.transformer(patches))
+        else:
+            outs = []
+            x_ = patches
+
+            for blk in self.transformer:
+                x_ = blk(x_)
+                outs.append(x_)
+
+            features = torch.cat(outs[-self.num_last_blocks:], dim=2)
+
+
         features = rearrange(features, 'b t c -> t b c')
 
         if self.linprobe:

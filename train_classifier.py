@@ -27,6 +27,8 @@ if __name__ == '__main__':
     parser.add_argument("--linprobe", action="store_true")
     parser.add_argument("--arch", type=str, default="vit_tiny", choices=["vit_tiny", "vit_base"])
     parser.add_argument("--ds", default="cifar10", type=str)
+    parser.add_argument("--num_last_blocks", "-nlb", type=int, default=1)
+
 
     args = parser.parse_args()
 
@@ -49,12 +51,14 @@ if __name__ == '__main__':
 
     vit_kwargs = VIT_KWARGS[args.arch]
     model = MAE_ViT(**vit_kwargs, **imsize_kwargs)
+
     ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')
     model.load_state_dict(ckpt["model"])
     writer = SummaryWriter(args.logdir)
     model = ViT_Classifier(
         model.encoder, num_classes=(10 if args.ds=="cifar10" else 100 if args.ds=="cifar100" else 1000),
-        linprobe=args.linprobe
+        linprobe=args.linprobe,
+        num_last_blocks=args.num_last_blocks
     ).to(device)
 
     loss_fn = torch.nn.CrossEntropyLoss()

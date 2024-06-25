@@ -33,6 +33,7 @@ if __name__ == '__main__':
     parser.add_argument("--umae_lambda", type=float, default=0)
     parser.add_argument("--latent_lambda", type=float, default=0)
     parser.add_argument("--latent_loss_detach_targets", "-lldt", action="store_true", default=False)
+    parser.add_argument("--latent_loss_block", "-llb", type=int, default=None)
     parser.add_argument("--arch", type=str, default="vit_tiny", choices=["vit_tiny", "vit_base"])
     parser.add_argument("--ds", default="cifar10", type=str)
     parser.add_argument("--distill_teacher_path", type=Path, default=None)
@@ -43,6 +44,10 @@ if __name__ == '__main__':
     setup_seed(args.seed)
 
     args.logdir.mkdir(parents=True, exist_ok=True)
+
+    if args.latent_loss_block is None:
+        args.latent_loss_block = VIT_KWARGS[args.arch]["encoder_layer"] - 1
+        print(f"Setting {args.latent_loss_block=}, i.e. the last encoder layer")
 
     maybe_setup_wandb(logdir=args.logdir, args=args, job_type='pretrain')
 
@@ -55,12 +60,14 @@ if __name__ == '__main__':
     train_dataset, val_dataset, imsize_kwargs = get_datasets(args, stl_train_ctx="train")
 
     dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=8)
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, load_batch_size, shuffle=False, num_workers=8)
     writer = SummaryWriter(args.logdir)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     vit_kwargs = VIT_KWARGS[args.arch]
     model = MAE_ViT(
         mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher,
+        latent_loss_block=args.latent_loss_block,
         **vit_kwargs,
         **imsize_kwargs
     ).to(device)
@@ -152,7 +159,24 @@ if __name__ == '__main__':
                 img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=3)
                 writer.add_image('train/mae_image', (img + 1) / 2, global_step=e)
 
-        
+        if e % 5 == 0:
+            with torch.no_grad():
+                # https://core.ac.uk/download/pdf/147929764.pdf#page=3.81
+                Xs = []
+                for val_img, _ in val_dataloader:
+                    features, _, _, _ = model.encoder.forward(val_img, mask_ratio=0)
+                    cls_features = features[0]
+                    Xs.append(cls_features.detach().cpu().numpy())
+
+                Xs = np.concatenate(Xs, axis=0)
+                U, D, V = np.linalg.svd(Xs)
+                D_l1 = np.abs(D).sum()
+                P = D / D_l1
+                H = P * np.log(P)
+                effrank = np.exp(-H.sum())
+                writer.add_scalar("train/effrank", effrank, global_step=e)
+
+
         ''' save model '''
         ckpt = {
             "model": model.state_dict(),
