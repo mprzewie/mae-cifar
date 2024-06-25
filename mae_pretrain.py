@@ -164,6 +164,7 @@ if __name__ == '__main__':
                 # https://core.ac.uk/download/pdf/147929764.pdf#page=3.81
                 Xs = []
                 for val_img, _ in val_dataloader:
+                    val_img = val_img.to(device)
                     features, _, _, _ = model.encoder.forward(val_img, mask_ratio=0)
                     cls_features = features[0]
                     Xs.append(cls_features.detach().cpu().numpy())
