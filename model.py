@@ -135,6 +135,7 @@ class MAE_Encoder(torch.nn.Module):
         attns = torch.stack(attns, dim=1)
 
         trans = x_
+
         assert latent_features is not None, f"{latent_loss_block=}, {len(self.transformer)=}"
 
         features = self.layer_norm(trans)

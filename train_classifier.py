@@ -10,7 +10,7 @@ from torchvision.datasets import ImageFolder, STL10
 from torchvision.transforms import ToTensor, Compose, Normalize, transforms
 from tqdm import tqdm
 
-from datasets import get_datasets
+from datasets import get_datasets, parse_ds_args
 from model import *
 from utils import setup_seed, maybe_setup_wandb
 
@@ -31,6 +31,7 @@ if __name__ == '__main__':
 
 
     args = parser.parse_args()
+    parse_ds_args(args)
 
     setup_seed(args.seed)
 
@@ -43,14 +44,14 @@ if __name__ == '__main__':
     assert batch_size % load_batch_size == 0
     steps_per_update = batch_size // load_batch_size
 
-    train_dataset, val_dataset, imsize_kwargs = get_datasets(args, stl_train_ctx="test")
+    train_dataset, val_dataset = get_datasets(args, stl_train_ctx="test")
 
     train_dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, load_batch_size, shuffle=False, num_workers=4)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     vit_kwargs = VIT_KWARGS[args.arch]
-    model = MAE_ViT(**vit_kwargs, **imsize_kwargs)
+    model = MAE_ViT(**vit_kwargs, image_size=args.resolution, patch_size=args.patch_size)
 
     ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')
     model.load_state_dict(ckpt["model"])

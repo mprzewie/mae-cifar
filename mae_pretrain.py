@@ -13,7 +13,7 @@ from torchvision.datasets import ImageFolder, STL10
 from torchvision.transforms import ToTensor, Compose, Normalize, transforms
 from tqdm import tqdm
 
-from datasets import get_datasets
+from datasets import get_datasets, parse_ds_args
 from model import MAE_ViT, VIT_KWARGS
 from utils import setup_seed, maybe_setup_wandb
 import torchvision.transforms as T
@@ -36,10 +36,12 @@ if __name__ == '__main__':
     parser.add_argument("--latent_loss_block", "-llb", type=int, default=None)
     parser.add_argument("--arch", type=str, default="vit_tiny", choices=["vit_tiny", "vit_base"])
     parser.add_argument("--ds", default="cifar10", type=str)
+    parser.add_argument("--resolution", "--res", default=None, type=int)
     parser.add_argument("--distill_teacher_path", type=Path, default=None)
     parser.add_argument("--distill_lambda", type=float, default=0)
 
     args = parser.parse_args()
+    parse_ds_args(args)
 
     setup_seed(args.seed)
 
@@ -57,7 +59,7 @@ if __name__ == '__main__':
     assert batch_size % load_batch_size == 0
     steps_per_update = batch_size // load_batch_size
     
-    train_dataset, val_dataset, imsize_kwargs = get_datasets(args, stl_train_ctx="train")
+    train_dataset, val_dataset = get_datasets(args, stl_train_ctx="train")
 
     dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=8)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, load_batch_size, shuffle=False, num_workers=8)
@@ -68,16 +70,16 @@ if __name__ == '__main__':
     model = MAE_ViT(
         mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher,
         latent_loss_block=args.latent_loss_block,
+        image_size=args.resolution, patch_size=args.patch_size,
         **vit_kwargs,
-        **imsize_kwargs
     ).to(device)
     teacher = None
 
     if args.distill_teacher_path is not None:
         teacher = MAE_ViT(
             mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher,
+            image_size=args.resolution, patch_size=args.patch_size,
             **vit_kwargs,
-            **imsize_kwargs
         ).to(device)
 
         ckpt = torch.load(args.distill_teacher_path)
@@ -97,7 +99,7 @@ if __name__ == '__main__':
         for img, label in tqdm(iter(dataloader), desc=f"Pretrain: {e}"):
             step_count += 1
             img = img.to(device)
-            predicted_img, mask, features, l_decoder_features, (fi, bi) = model(img)
+            predicted_img, mask, features, l_decoder_features, (fi, bi) = model.forward(img)
 
             cls_features = features[0]
 
@@ -155,8 +157,16 @@ if __name__ == '__main__':
                 val_img = val_img.to(device)
                 predicted_val_img, mask, features, l_decoder_features, (fi, bi)= model(val_img)
                 predicted_val_img = predicted_val_img * mask + val_img * (1 - mask)
-                img = torch.cat([val_img * (1 - mask), predicted_val_img, val_img], dim=0)
-                img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=3)
+
+                d_input = torch.cat([features[:1], l_decoder_features], dim=0)
+                predicted_l_decoder_img, l_mask = model.decoder.forward(d_input, backward_indexes=bi)
+                # assert torch.equal(mask, l_mask)
+
+                # assert False, (features.shape, l_decoder_features.shape, d_input.shape, predicted_l_decoder_img.shape)
+
+                img = torch.cat([val_img, val_img * (1 - mask), predicted_val_img, predicted_l_decoder_img], dim=0)
+                img1 = img
+                img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=4)
                 writer.add_image('train/mae_image', (img + 1) / 2, global_step=e)
 
         if e % 5 == 0:
