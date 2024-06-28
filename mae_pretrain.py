@@ -33,6 +33,8 @@ if __name__ == '__main__':
     parser.add_argument("--umae_lambda", type=float, default=0)
     parser.add_argument("--latent_lambda", type=float, default=0)
     parser.add_argument("--latent_loss_detach_targets", "-lldt", action="store_true", default=False)
+    parser.add_argument("--latent_loss_detach_cls", "-lldc", action="store_true", default=False)
+
     parser.add_argument("--arch", type=str, default="vit_tiny", choices=["vit_tiny", "vit_base"])
     parser.add_argument("--ds", default="cifar10", type=str)
 
@@ -59,6 +61,7 @@ if __name__ == '__main__':
     vit_kwargs = VIT_KWARGS[args.arch]
     model = MAE_ViT(
         mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher,
+        latent_loss_detach_cls=args.latent_loss_detach_cls,
         **vit_kwargs,
         **imsize_kwargs
     ).to(device)

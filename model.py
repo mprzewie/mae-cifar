@@ -189,6 +189,7 @@ class MAE_ViT(torch.nn.Module):
                  decoder_head=3,
                  mask_ratio_student=0.75,
                  mask_ratio_teacher=-1,
+                 latent_loss_detach_cls: bool = False
                  ) -> None:
         super().__init__()
 
@@ -200,6 +201,7 @@ class MAE_ViT(torch.nn.Module):
 
         self.mask_ratio_student = mask_ratio_student
         self.mask_ratio_teacher = mask_ratio_teacher
+        self.latent_loss_detach_cls = latent_loss_detach_cls
 
 
     # def forward_l_decoder(self):
@@ -218,6 +220,9 @@ class MAE_ViT(torch.nn.Module):
 
         ## predicting encoder features
         cls_features = features[:1]
+        if self.latent_loss_detach_cls:
+            cls_features = cls_features.detach()
+
         mask_features = self.l_decoder.mask_token.expand(features.shape[0]-1, features.shape[1], -1)
         l_features = torch.cat([cls_features, mask_features], dim=0)
         l_pred, _ = self.l_decoder(l_features, backward_indexes)
