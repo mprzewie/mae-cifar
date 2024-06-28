@@ -34,6 +34,8 @@ if __name__ == '__main__':
     parser.add_argument("--latent_lambda", type=float, default=0)
     parser.add_argument("--latent_loss_detach_targets", "-lldt", action="store_true", default=False)
     parser.add_argument("--latent_loss_block", "-llb", type=int, default=None)
+    parser.add_argument("--latent_loss_detach_cls", "-lldc", action="store_true", default=False)
+
     parser.add_argument("--arch", type=str, default="vit_tiny", choices=["vit_tiny", "vit_base"])
     parser.add_argument("--ds", default="cifar10", type=str)
     parser.add_argument("--resolution", "--res", default=None, type=int)
@@ -71,6 +73,7 @@ if __name__ == '__main__':
         mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher,
         latent_loss_block=args.latent_loss_block,
         image_size=args.resolution, patch_size=args.patch_size,
+        latent_loss_detach_cls=args.latent_loss_detach_cls,
         **vit_kwargs,
     ).to(device)
     teacher = None
