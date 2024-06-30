@@ -24,7 +24,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=4096)
     parser.add_argument('--max_device_batch_size', type=int, default=512)
     parser.add_argument('--base_learning_rate', type=float, default=1.5e-4)
-    parser.add_argument('--weight_decay', type=float, default=0.05)
+    parser.add_argument('--weight_decay', "-wd", type=float, default=0.05)
     parser.add_argument('--mask_ratio_student', '--mask_ratio', '-mrs', type=float, default=0.75)
     parser.add_argument('--mask_ratio_teacher', '-mrt', type=float, default=-1)
     parser.add_argument('--total_epoch', type=int, default=2000)
@@ -115,7 +115,7 @@ if __name__ == '__main__':
             target_features = features[1:]
             if args.latent_loss_detach_targets:
                 target_features = target_features.detach()
-            loss_latent_decoder = ((features[1:] - l_decoder_features) ** 2).mean()
+            loss_latent_decoder = ((target_features - l_decoder_features) ** 2).mean()
             ####
 
             loss_distill = torch.tensor(0)
@@ -130,6 +130,7 @@ if __name__ == '__main__':
             loss = loss_mae + (args.umae_lambda * loss_umae) + (args.latent_lambda * loss_latent_decoder) + (args.distill_lambda + loss_distill)
 
             loss.backward()
+
             if step_count % steps_per_update == 0:
                 optim.step()
                 optim.zero_grad()
