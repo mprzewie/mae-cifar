@@ -27,6 +27,7 @@ if __name__ == '__main__':
     parser.add_argument("--linprobe", action="store_true")
     parser.add_argument("--arch", type=str, default="vit_tiny", choices=["vit_tiny", "vit_base"])
     parser.add_argument("--ds", default="cifar10", type=str)
+    parser.add_argument("--named_ds_root", default=Path("/shared/sets/datasets/vision/"), type=Path)
     parser.add_argument("--resolution", "--res", default=None, type=int)
 
     args = parser.parse_args()
