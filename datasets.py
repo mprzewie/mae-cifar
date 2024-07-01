@@ -64,7 +64,7 @@ def get_datasets(args, *, stl_train_ctx: Literal["train", "test"] = None) -> Tup
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
         transform_val = transforms.Compose([
-            transforms.Resize((args.resolution * (16/14)), interpolation=3),
+            transforms.Resize(int(args.resolution * (16/14)), interpolation=3),
             transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
