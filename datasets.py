@@ -7,7 +7,8 @@ from torch.utils.data import Dataset
 from torchvision.datasets import ImageFolder, STL10
 from torchvision.transforms import ToTensor, Compose, Normalize, transforms
 
-def get_datasets(args, *, stl_train_ctx: Literal["train", "test"] = None) -> Tuple[Dataset, Dataset, dict]:
+
+def get_datasets(args, *, stl_train_ctx: Literal["train", "test"] = None) -> Tuple[Dataset, Dataset]:
     if args.ds == "cifar10":
         root = args.named_ds_root / "cifar10"
         train_dataset = torchvision.datasets.CIFAR10(root, train=True, download=True,
@@ -60,11 +61,12 @@ def get_datasets(args, *, stl_train_ctx: Literal["train", "test"] = None) -> Tup
             transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-        train_dataset = ImageFolder(os.path.join(args.ds, 'train'), transform=transform_train)
-        val_dataset = ImageFolder(os.path.join(args.ds, 'val'), transform=transform_val)
 
+        ds_folder = args.named_ds_root / args.ds
+        train_dataset = ImageFolder(ds_folder / 'train', transform=transform_train)
+        val_dataset = ImageFolder(ds_folder / 'val', transform=transform_val)
 
-    return train_dataset, val_dataset #, imsize_kwargs
+    return train_dataset, val_dataset
 
 
 def parse_ds_args(args):
