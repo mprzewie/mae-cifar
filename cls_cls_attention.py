@@ -10,7 +10,7 @@ from torchvision.datasets import ImageFolder
 from torchvision.transforms import ToTensor, Compose, Normalize, transforms
 from tqdm import tqdm
 
-from datasets import get_datasets
+from datasets import get_datasets, parse_ds_args
 from model import *
 from utils import setup_seed, maybe_setup_wandb
 
@@ -31,6 +31,7 @@ if __name__ == '__main__':
     parser.add_argument("--resolution", "--res", default=None, type=int)
 
     args = parser.parse_args()
+    parse_ds_args(args)
 
     setup_seed(args.seed)
 
