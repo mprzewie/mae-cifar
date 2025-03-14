@@ -38,6 +38,7 @@ if __name__ == '__main__':
 
     setup_seed(args.seed)
 
+    args.logdir.mkdir(parents=True, exist_ok=True)
     maybe_setup_wandb(logdir=args.logdir, args=args, job_type=("linprobe" if args.linprobe else "finetune"))
 
 
@@ -56,8 +57,12 @@ if __name__ == '__main__':
     vit_kwargs = VIT_KWARGS[args.arch]
     model = MAE_ViT(**vit_kwargs, image_size=args.resolution, patch_size=args.patch_size, orto_linear=args.orto_linear)
 
-    ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')
-    model.load_state_dict(ckpt["model"])
+    try:
+        ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')
+        model.load_state_dict(ckpt["model"])
+    except Exception as e:
+        print("Error loading state dict, I'll train from scratch", e)
+
     writer = SummaryWriter(args.logdir)
     model = ViT_Classifier(
         model.encoder, num_classes=(10 if args.ds=="cifar10" else 100 if args.ds=="cifar100" else 1000),
