@@ -103,32 +103,32 @@ if __name__ == '__main__':
         for img, label in tqdm(iter(dataloader), desc=f"Pretrain: {e}"):
             step_count += 1
             img = img.to(device)
-            predicted_img, mask, features, l_decoder_features, (fi, bi) = model.forward(img)
+            predicted_img, mask, features, (fi, bi) = model.forward(img)
 
             cls_features = features[0]
 
             # umae
-            norm_features =  torch.nn.functional.normalize(cls_features)
-            sim = norm_features @ norm_features.T
-            loss_umae = sim.pow(2).mean()
+            # norm_features =  torch.nn.functional.normalize(cls_features)
+            # sim = norm_features @ norm_features.T
+            # loss_umae = sim.pow(2).mean()
             ####
             # latent decoder
-            target_features = features[1:]
-            if args.latent_loss_detach_targets:
-                target_features = target_features.detach()
-            loss_latent_decoder = ((target_features - l_decoder_features) ** 2).mean()
+            # target_features = features[1:]
+            # if args.latent_loss_detach_targets:
+            #     target_features = target_features.detach()
+            # loss_latent_decoder = ((target_features - l_decoder_features) ** 2).mean()
             ####
 
-            loss_distill = torch.tensor(0)
-            if teacher is not None:
-                tfeatures, tfi, tbi = teacher.encoder(img, mask_ratio=teacher.mask_ratio_student, forward_indexes=fi, backward_indexes=bi)
-                assert torch.equal(fi, tfi)
-                assert torch.equal(bi, tbi)
-                loss_distill = torch.mean((tfeatures[1:] - features[1:]) ** 2)
+            # loss_distill = torch.tensor(0)
+            # if teacher is not None:
+            #     tfeatures, tfi, tbi = teacher.encoder(img, mask_ratio=teacher.mask_ratio_student, forward_indexes=fi, backward_indexes=bi)
+            #     assert torch.equal(fi, tfi)
+            #     assert torch.equal(bi, tbi)
+            #     loss_distill = torch.mean((tfeatures[1:] - features[1:]) ** 2)
 
             loss_mae = torch.mean((predicted_img - img) ** 2 * mask) / args.mask_ratio_student
 
-            loss = loss_mae + (args.umae_lambda * loss_umae) + (args.latent_lambda * loss_latent_decoder) + (args.distill_lambda + loss_distill)
+            loss = loss_mae #+ (args.umae_lambda * loss_umae) + (args.latent_lambda * loss_latent_decoder) + (args.distill_lambda + loss_distill)
 
             loss.backward()
 
@@ -138,9 +138,9 @@ if __name__ == '__main__':
 
             metrics["loss_total"].append(loss.item())
             metrics["loss_mae"].append(loss_mae.item())
-            metrics["loss_umae"].append(loss_umae.item())
-            metrics["loss_latent"].append(loss_latent_decoder.item())
-            metrics["loss_distill"].append(loss_distill.item())
+            # metrics["loss_umae"].append(loss_umae.item())
+            # metrics["loss_latent"].append(loss_latent_decoder.item())
+            # metrics["loss_distill"].append(loss_distill.item())
 
         for k, v in metrics.items():
             writer.add_scalar(f"train/{k}", np.mean(v), global_step=e)
@@ -160,18 +160,18 @@ if __name__ == '__main__':
             with torch.no_grad():
                 val_img = torch.stack([val_dataset[i][0] for i in range(16)])
                 val_img = val_img.to(device)
-                predicted_val_img, mask, features, l_decoder_features, (fi, bi)= model(val_img)
+                predicted_val_img, mask, features, (fi, bi)= model(val_img)
                 predicted_val_img = predicted_val_img * mask + val_img * (1 - mask)
 
-                d_input = torch.cat([features[:1], l_decoder_features], dim=0)
-                predicted_l_decoder_img, l_mask = model.decoder.forward(d_input, backward_indexes=bi)
+                # d_input = torch.cat([features[:1], l_decoder_features], dim=0)
+                # predicted_l_decoder_img, l_mask = model.decoder.forward(d_input, backward_indexes=bi)
                 # assert torch.equal(mask, l_mask)
 
                 # assert False, (features.shape, l_decoder_features.shape, d_input.shape, predicted_l_decoder_img.shape)
 
-                img = torch.cat([val_img, val_img * (1 - mask), predicted_val_img, predicted_l_decoder_img], dim=0)
+                img = torch.cat([val_img, val_img * (1 - mask), predicted_val_img], dim=0)
                 img1 = img
-                img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=4)
+                img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=3)
                 writer.add_image('train/mae_image', (img + 1) / 2, global_step=e)
 
         if e % 5 == 0:
@@ -180,7 +180,7 @@ if __name__ == '__main__':
                 Xs = []
                 for val_img, _ in val_dataloader:
                     val_img = val_img.to(device)
-                    features, _, _, _ = model.encoder.forward(val_img, mask_ratio=0)
+                    features, _, _ = model.encoder.forward(val_img, mask_ratio=0)
                     cls_features = features[0]
                     Xs.append(cls_features.detach().cpu().numpy())
 
