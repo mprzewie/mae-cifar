@@ -42,37 +42,63 @@ def take_indexes(sequences, indexes):
 
 
 class OrthogonalLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias: bool=True, num_reflections: int=1):
+    def __init__(self, in_features, out_features, bias=True, num_reflections=1):
         super().__init__()
         assert in_features == out_features
-        self.v = nn.Parameter(torch.randn(num_reflections, out_features - 1))
-        self.m = nn.Parameter(torch.randn(out_features) * 0.1 + 1.0)
+        features = in_features
+        self.features = features
+
+        # Householder vector (N-1 parameters)
+        self.v = nn.Parameter(torch.randn(features - 1))
+
+        # Rotation vector (N-1 parameters)
+        self.r = nn.Parameter(torch.randn(features - 1) * 0.1)
+        # self.register_buffer("r", torch.zeros(features - 1))
+
+        # Modulation vector (N parameters)
+        self.m = nn.Parameter(torch.ones(features))
 
         if bias:
-            self.bias = nn.Parameter(torch.zeros(out_features))
+            self.bias = nn.Parameter(torch.zeros(features))
         else:
             self.register_parameter('bias', None)
 
+        assert num_reflections == 1
+
     def construct_Q(self):
-        """Constructs an orthonormal basis from v using a Householder transformation."""
-        N = self.m.shape[0]
-        Q = torch.eye(N, device=self.v.device)  # Start with identity matrix
+        """Constructs an orthogonal matrix by rotating e2,...,eN around e1, then applying Householder reflection"""
+        N = self.features
+        device = self.r.device
 
-        for i in range(self.v.shape[0]):
-            v = torch.cat([torch.tensor([1.0], device=self.v.device), self.v[i]])  # Extend to full vector
-            v = v / v.norm()  # Normalize
-            H = torch.eye(N, device=v.device) - 2 * torch.outer(v, v) / (v @ v)  # Householder reflection
-            Q = H @ Q  # Apply reflection
+        # Step 1: Construct Skew-Symmetric Rotation Matrix for e2, ..., eN Around e1
+        R = torch.zeros((N, N), device=device)
 
-        # v = torch.cat([torch.tensor([1.0], device=self.v.device), self.v])  # Add implicit first entry
-        # v = v / v.norm()  # Normalize v to be a unit vector
-        # I = torch.eye(N, device=v.device)
-        # Q = I - 2 * torch.outer(v, v) / (v @ v)  # Householder matrix
+        # Generate indices for first N-1 parameters
+        indices = torch.arange(1, N, device=device)
+
+        # Ensure r has the correct number of parameters
+        assert self.r.shape[0] == N - 1, f"Expected {N-1} rotation parameters, got {self.r.shape[0]}"
+
+        # Fill a simple structured skew-symmetric matrix (applying N-1 independent rotations)
+        R[0, indices] = self.r  # Rotate e2,...,eN around e1
+        R[indices, 0] = -self.r  # Ensure skew-symmetry
+
+        # Compute the full orthogonal rotation matrix
+        Q_rotated = torch.matrix_exp(R)
+
+        # Step 2: Compute Householder Reflection (Fixing e1 -> v1)
+        v_full = torch.cat([torch.tensor([1.0], device=device), self.v])  # Extend to full size
+        v_full = v_full / v_full.norm()  # Normalize to be a unit vector
+        H = torch.eye(N, device=device) - 2 * torch.outer(v_full, v_full)  # Householder matrix
+
+        # Step 3: Apply Householder Reflection After Rotation
+        Q = H @ Q_rotated
+
         return Q
 
     def forward(self, x):
-        Q = self.construct_Q()  # Get orthonormal basis
-        W = (Q * self.m.unsqueeze(0))  # + torch.diag(self.r) #.unsqueeze(1)  # Scale basis by m
+        Q = self.construct_Q()
+        W = Q * self.m.unsqueeze(0)  # Apply modulation
         return torch.nn.functional.linear(x, W, self.bias)
 
 
