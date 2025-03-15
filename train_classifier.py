@@ -30,7 +30,7 @@ if __name__ == '__main__':
     parser.add_argument("--named_ds_root", default=Path("/shared/sets/datasets/vision/"), type=Path)
     parser.add_argument("--num_last_blocks", "-nlb", type=int, default=1)
     parser.add_argument("--resolution", "--res", default=None, type=int)
-    parser.add_argument("--orto_linear", action="store_true", default=False)
+    parser.add_argument("--orto_reflections", type=int, default=0)
 
 
     args = parser.parse_args()
@@ -55,7 +55,7 @@ if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     vit_kwargs = VIT_KWARGS[args.arch]
-    model = MAE_ViT(**vit_kwargs, image_size=args.resolution, patch_size=args.patch_size, orto_linear=args.orto_linear)
+    model = MAE_ViT(**vit_kwargs, image_size=args.resolution, patch_size=args.patch_size, orto_reflections=args.orto_reflections)
 
     try:
         ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')

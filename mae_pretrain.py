@@ -42,7 +42,7 @@ if __name__ == '__main__':
     parser.add_argument("--resolution", "--res", default=None, type=int)
     parser.add_argument("--distill_teacher_path", type=Path, default=None)
     parser.add_argument("--distill_lambda", type=float, default=0)
-    parser.add_argument("--orto_linear", action="store_true", default=False)
+    parser.add_argument("--orto_reflections", type=int, default=0)
 
     args = parser.parse_args()
     parse_ds_args(args)
@@ -76,12 +76,13 @@ if __name__ == '__main__':
         latent_loss_block=args.latent_loss_block,
         image_size=args.resolution, patch_size=args.patch_size,
         latent_loss_detach_cls=args.latent_loss_detach_cls,
-        orto_linear=args.orto_linear,
+        orto_reflections=args.orto_reflections,
         **vit_kwargs,
     ).to(device)
     teacher = None
 
     if args.distill_teacher_path is not None:
+        assert False
         teacher = MAE_ViT(
             mask_ratio_student=args.mask_ratio_student, mask_ratio_teacher=args.mask_ratio_teacher,
             image_size=args.resolution, patch_size=args.patch_size,

@@ -42,10 +42,10 @@ def take_indexes(sequences, indexes):
 
 
 class OrthogonalLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias: bool=True):
+    def __init__(self, in_features, out_features, bias: bool=True, num_reflections: int=1):
         super().__init__()
         assert in_features == out_features
-        self.v = nn.Parameter(torch.randn(out_features - 1))  # N-1 parameters for unit vector
+        self.v = nn.Parameter(torch.randn(num_reflections, out_features - 1))
         self.m = nn.Parameter(torch.randn(out_features) * 0.1 + 1.0)
 
         if bias:
@@ -56,10 +56,18 @@ class OrthogonalLinear(nn.Module):
     def construct_Q(self):
         """Constructs an orthonormal basis from v using a Householder transformation."""
         N = self.m.shape[0]
-        v = torch.cat([torch.tensor([1.0], device=self.v.device), self.v])  # Add implicit first entry
-        v = v / v.norm()  # Normalize v to be a unit vector
-        I = torch.eye(N, device=v.device)
-        Q = I - 2 * torch.outer(v, v) / (v @ v)  # Householder matrix
+        Q = torch.eye(N, device=self.v.device)  # Start with identity matrix
+
+        for i in range(self.v.shape[0]):
+            v = torch.cat([torch.tensor([1.0], device=self.v.device), self.v[i]])  # Extend to full vector
+            v = v / v.norm()  # Normalize
+            H = torch.eye(N, device=v.device) - 2 * torch.outer(v, v) / (v @ v)  # Householder reflection
+            Q = H @ Q  # Apply reflection
+
+        # v = torch.cat([torch.tensor([1.0], device=self.v.device), self.v])  # Add implicit first entry
+        # v = v / v.norm()  # Normalize v to be a unit vector
+        # I = torch.eye(N, device=v.device)
+        # Q = I - 2 * torch.outer(v, v) / (v @ v)  # Householder matrix
         return Q
 
     def forward(self, x):
@@ -69,7 +77,7 @@ class OrthogonalLinear(nn.Module):
 
 
 class OrthoLinearContainer(nn.Module):
-    def __init__(self, in_features, out_features, bias: bool=True):
+    def __init__(self, in_features, out_features, bias: bool=True, num_reflections: int=1):
         super().__init__()
 
         self.inner = nn.ModuleList()
@@ -79,11 +87,11 @@ class OrthoLinearContainer(nn.Module):
         if out_features >= in_features:
             assert out_features % in_features == 0
             for _ in range(out_features // in_features):
-                self.inner.append(OrthogonalLinear(in_features, in_features, bias=bias))
+                self.inner.append(OrthogonalLinear(in_features, in_features, bias=bias, num_reflections=num_reflections))
         else:
             assert in_features % out_features == 0
             for _ in range(in_features // out_features):
-                self.inner.append(OrthogonalLinear(out_features, out_features, bias=bias))
+                self.inner.append(OrthogonalLinear(out_features, out_features, bias=bias, num_reflections=num_reflections))
 
 
     def forward(self, x):
@@ -140,17 +148,17 @@ class AttnBlock(Block):
         return x_blk
 
 class OrtoAttention(Attention):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., orto_linear: bool = False):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., orto_reflections: int = 0):
         super().__init__(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=proj_drop)
-        if orto_linear:
-            self.qkv = OrthoLinearContainer(dim, 3*dim, bias=qkv_bias)
-            self.proj = OrthogonalLinear(dim, dim)
+        if orto_reflections > 0:
+            self.qkv = OrthoLinearContainer(dim, 3*dim, bias=qkv_bias, num_reflections=orto_reflections)
+            self.proj = OrthogonalLinear(dim, dim, num_reflections=orto_reflections)
 
 
 class OrtoMlp(Mlp):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
     """
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, bias=True, drop=0., orto_linear: bool=False):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, bias=True, drop=0., orto_reflections: int = 0):
         super().__init__(
             in_features, hidden_features, out_features, act_layer, bias, drop
         )
@@ -158,22 +166,21 @@ class OrtoMlp(Mlp):
         hidden_features = hidden_features or in_features
         bias = to_2tuple(bias)
 
-        if orto_linear:
-            self.fc1 = OrthoLinearContainer(in_features, hidden_features, bias=bias[0])
-            self.fc2 = OrthoLinearContainer(hidden_features, out_features, bias=bias[1])
+        if orto_reflections > 0:
+            self.fc1 = OrthoLinearContainer(in_features, hidden_features, bias=bias[0], num_reflections=orto_reflections)
+            self.fc2 = OrthoLinearContainer(hidden_features, out_features, bias=bias[1], num_reflections=orto_reflections)
 
 
 class OrtoBlock(Block):
     def __init__(
             self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0., init_values=None,
-            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, orto_linear: bool=False):
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, orto_reflections: int = 0):
         super().__init__(
             dim, num_heads, mlp_ratio, qkv_bias, drop, attn_drop, init_values, drop_path, act_layer, norm_layer
         )
-        if orto_linear:
-            self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
-                                      orto_linear=orto_linear)
-            self.mlp = OrtoMlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop, orto_linear=orto_linear)
+        if orto_reflections:
+            self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, orto_reflections=orto_reflections)
+            self.mlp = OrtoMlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop, orto_reflections=orto_reflections)
 
 
 class MAE_Encoder(torch.nn.Module):
@@ -183,7 +190,7 @@ class MAE_Encoder(torch.nn.Module):
                  emb_dim=192,
                  num_layer=12,
                  num_head=3,
-                 orto_linear: bool=False,
+                 orto_reflections: int = 0,
                  ) -> None:
         super().__init__()
 
@@ -195,7 +202,7 @@ class MAE_Encoder(torch.nn.Module):
 
         self.patchify = torch.nn.Conv2d(3, emb_dim, patch_size, patch_size)
 
-        self.transformer = torch.nn.Sequential(*[OrtoBlock(emb_dim, num_head, orto_linear=orto_linear) for _ in range(num_layer)])
+        self.transformer = torch.nn.Sequential(*[OrtoBlock(emb_dim, num_head, orto_reflections=orto_reflections) for _ in range(num_layer)])
 
         self.layer_norm = torch.nn.LayerNorm(emb_dim)
 
@@ -258,14 +265,14 @@ class MAE_Decoder(torch.nn.Module):
                  num_layer=4,
                  num_head=3,
                  out_size: int = None,
-                 orto_linear: bool = False
+                 orto_reflections: int = 0
                  ) -> None:
         super().__init__()
         out_size = out_size or 3 * patch_size ** 2
         self.mask_token = torch.nn.Parameter(torch.zeros(1, 1, emb_dim))
         self.pos_embedding = torch.nn.Parameter(torch.zeros((image_size // patch_size) ** 2 + 1, 1, emb_dim))
 
-        self.transformer = torch.nn.Sequential(*[OrtoBlock(emb_dim, num_head, orto_linear=orto_linear) for _ in range(num_layer)])
+        self.transformer = torch.nn.Sequential(*[OrtoBlock(emb_dim, num_head, orto_reflections=orto_reflections) for _ in range(num_layer)])
 
         self.head = torch.nn.Linear(emb_dim, out_size)
         self.patch2img = Rearrange('(h w) b (c p1 p2) -> b c (h p1) (w p2)', p1=patch_size, p2=patch_size, h=image_size//patch_size)
@@ -309,15 +316,15 @@ class MAE_ViT(torch.nn.Module):
                  mask_ratio_teacher=-1,
                  latent_loss_block: int = 11,
                  latent_loss_detach_cls: bool = False,
-                 orto_linear: bool = False,
+                 orto_reflections: int = 0,
                  ) -> None:
         super().__init__()
 
         # self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
         self.latent_loss_block = latent_loss_block
 
-        self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, orto_linear=orto_linear)
-        self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=3 * patch_size ** 2, orto_linear=orto_linear)
+        self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, orto_reflections=orto_reflections)
+        self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=3 * patch_size ** 2, orto_reflections=orto_reflections)
         # self.l_decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=emb_dim)
         # self.l_decoder.patch2img = nn.Identity()
 
@@ -414,9 +421,9 @@ if __name__ == '__main__':
 
     img = torch.rand(2, 3, 32, 32)
     # encoder = MAE_Encoder(orto_linear=True)
-    encoder = MAE_Encoder(orto_linear=False)
+    encoder = MAE_Encoder(orto_reflections=False)
     # decoder = MAE_Decoder(orto_linear=True)
-    decoder = MAE_Decoder(orto_linear=False)
+    decoder = MAE_Decoder(orto_reflections=False)
     features, fi, backward_indexes = encoder.forward(img, ratio)
     print(forward_indexes.shape)
     predicted_img, mask = decoder(features, backward_indexes)
