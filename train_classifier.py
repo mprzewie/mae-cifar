@@ -50,8 +50,11 @@ if __name__ == '__main__':
 
     train_dataset, val_dataset = get_datasets(args, stl_train_ctx="test")
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, load_batch_size, shuffle=False, num_workers=4)
+    def worker_init_fn(worker_id):
+        os.sched_setaffinity(0, range(os.cpu_count()))
+
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4, worker_init_fn=worker_init_fn)
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, load_batch_size, shuffle=False, num_workers=4, worker_init_fn=worker_init_fn)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     vit_kwargs = VIT_KWARGS[args.arch]
