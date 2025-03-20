@@ -4,11 +4,13 @@ import numpy as np
 
 from einops import repeat, rearrange
 from einops.layers.torch import Rearrange
-# from timm.models import to_2tuple
-from timm.models.layers.mlp import Mlp
-from timm.models.layers.helpers import to_2tuple
 
-# from timm.models import DropPath, Mlp, to_2tuple
+try:
+    from timm.models import to_2tuple
+    from timm.models.layers import Mlp
+except ImportError:
+    from timm.models.layers.mlp import Mlp
+    from timm.models.layers.helpers import to_2tuple
 
 from timm.models.layers import trunc_normal_
 from timm.models.vision_transformer import Block, Attention, LayerScale
