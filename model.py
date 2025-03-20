@@ -58,47 +58,55 @@ class OrthogonalLinear(nn.Module):
         # Modulation vector (N parameters)
         self.m = nn.Parameter(torch.ones(features))
 
+        self.num_chunks = num_reflections
+
         if bias:
             self.bias = nn.Parameter(torch.zeros(features))
         else:
             self.register_parameter('bias', None)
 
-        assert num_reflections == 1
-
-    def construct_Q(self):
-        """Constructs an orthogonal matrix by rotating e2,...,eN around e1, then applying Householder reflection"""
+    def construct_W(self):
+        """Fully vectorized construction of K orthogonal matrices, outputting only the necessary rows."""
         N = self.features
+        chunk_size = N // self.num_chunks  # Each chunk contributes this many rows
         device = self.r.device
 
-        # Step 1: Construct Skew-Symmetric Rotation Matrix for e2, ..., eN Around e1
-        R = torch.zeros((N, N), device=device)
+        # Step 1: Construct Skew-Symmetric Rotation Matrices for Each Chunk
+        R = torch.zeros((self.num_chunks, N, N), device=device)  # Shape: (K, N, N)
 
-        # Generate indices for first N-1 parameters
+        # Correctly assign N-1 parameters per chunk to ensure skew-symmetry
         indices = torch.arange(1, N, device=device)
 
-        # Ensure r has the correct number of parameters
-        assert self.r.shape[0] == N - 1, f"Expected {N-1} rotation parameters, got {self.r.shape[0]}"
+        # Fix: Now `self.r` is of shape (K, N-1) to allow independent rotations per chunk
+        R[:, 0, indices] = self.r  # Rotate e2,...,eN around e1 for each chunk
+        R[:, indices, 0] = -self.r  # Ensure skew-symmetry
 
-        # Fill a simple structured skew-symmetric matrix (applying N-1 independent rotations)
-        R[0, indices] = self.r  # Rotate e2,...,eN around e1
-        R[indices, 0] = -self.r  # Ensure skew-symmetry
+        # Compute full batch of orthogonal rotation matrices
+        Q_rotated = torch.matrix_exp(R)  # Shape: (K, N, N)
 
-        # Compute the full orthogonal rotation matrix
-        Q_rotated = torch.matrix_exp(R)
+        # Step 2: Compute Householder Reflections in a Batch
+        v_full = torch.cat([torch.ones(self.num_chunks, 1, device=device), self.v], dim=1)  # Shape: (K, N)
+        v_full = v_full / v_full.norm(dim=1, keepdim=True)  # Normalize each vector
 
-        # Step 2: Compute Householder Reflection (Fixing e1 -> v1)
-        v_full = torch.cat([torch.tensor([1.0], device=device), self.v])  # Extend to full size
-        v_full = v_full / v_full.norm()  # Normalize to be a unit vector
-        H = torch.eye(N, device=device) - 2 * torch.outer(v_full, v_full)  # Householder matrix
+        H = torch.eye(N, device=device).expand(self.num_chunks, N, N) - \
+            2 * v_full.unsqueeze(2) @ v_full.unsqueeze(1)  # Shape: (K, N, N)
 
         # Step 3: Apply Householder Reflection After Rotation
-        Q = H @ Q_rotated
+        Q = H @ Q_rotated  # Shape: (K, N, N)
 
-        return Q
+        # Step 4: Select Only the First `chunk_size` Rows From Each Chunk
+        Q_selected = Q[:, :chunk_size, :]  # Shape: (K, N//K, N)
+
+        # Step 5: Concatenate Along the Correct Dimension to Form Final Weight Matrix
+        W = torch.cat(torch.unbind(Q_selected, dim=0), dim=0)  # Shape: (N, N)
+
+        # Step 6: Apply Modulation
+        W = W * self.m.unsqueeze(1)  # Apply modulation
+
+        return W
 
     def forward(self, x):
-        Q = self.construct_Q()
-        W = Q * self.m.unsqueeze(0)  # Apply modulation
+        W = self.construct_W()
         return torch.nn.functional.linear(x, W, self.bias)
 
 
