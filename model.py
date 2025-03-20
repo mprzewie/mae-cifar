@@ -212,7 +212,16 @@ class OrtoBlock(Block):
             self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0., init_values=None,
             drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, orto_reflections: int = 0):
         super().__init__(
-            dim, num_heads, mlp_ratio, qkv_bias, drop, attn_drop, init_values, drop_path, act_layer, norm_layer
+            dim=dim,
+            num_heads=num_heads,
+            mlp_ratio=mlp_ratio,
+            qkv_bias=qkv_bias,
+            proj_drop=drop,
+            attn_drop=attn_drop,
+            init_values=init_values,
+            drop_path=drop_path,
+            act_layer=act_layer,
+            norm_layer=norm_layer
         )
         if orto_reflections:
             self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, orto_reflections=orto_reflections)
