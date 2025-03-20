@@ -196,7 +196,12 @@ class OrtoMlp(Mlp):
     """
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, bias=True, drop=0., orto_reflections: int = 0):
         super().__init__(
-            in_features, hidden_features, out_features, act_layer, bias, drop
+            in_features=in_features,
+            hidden_features=hidden_features,
+            out_features=out_features,
+            act_layer=act_layer,
+            bias=bias,
+            drop=drop
         )
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
