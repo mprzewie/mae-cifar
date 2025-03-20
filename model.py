@@ -49,18 +49,18 @@ class OrthogonalLinear(nn.Module):
         assert in_features == out_features
         features = in_features
         self.features = features
+        self.num_chunks = num_reflections
 
         # Householder vector (N-1 parameters)
-        self.v = nn.Parameter(torch.randn(features - 1))
+        self.v = nn.Parameter(torch.randn(num_reflections, features - 1))
 
-        # Rotation vector (N-1 parameters)
-        self.r = nn.Parameter(torch.randn(features - 1) * 0.1)
+        # Rotation vectors for each chunk (num_chunks x (N-1))
+        self.r = nn.Parameter(torch.randn(num_reflections, features - 1) * 0.1)
         # self.register_buffer("r", torch.zeros(features - 1))
 
         # Modulation vector (N parameters)
         self.m = nn.Parameter(torch.ones(features))
 
-        self.num_chunks = num_reflections
 
         if bias:
             self.bias = nn.Parameter(torch.zeros(features))
