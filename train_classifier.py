@@ -31,6 +31,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_last_blocks", "-nlb", type=int, default=1)
     parser.add_argument("--resolution", "--res", default=None, type=int)
     parser.add_argument("--orto_reflections", type=int, default=0)
+    parser.add_argument("--depth_expansion", type=int, default=1)
 
 
     args = parser.parse_args()
@@ -58,6 +59,12 @@ if __name__ == '__main__':
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     vit_kwargs = VIT_KWARGS[args.arch]
+
+    assert "encoder_layer" in vit_kwargs.keys()
+    vit_kwargs["encoder_layer"] = vit_kwargs["encoder_layer"] * args.depth_expansion
+
+    print(vit_kwargs)
+
     model = MAE_ViT(**vit_kwargs, image_size=args.resolution, patch_size=args.patch_size, orto_reflections=args.orto_reflections)
 
     try:
