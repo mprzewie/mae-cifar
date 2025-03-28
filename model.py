@@ -241,6 +241,7 @@ class MAE_Encoder(torch.nn.Module):
                  num_layer=12,
                  num_head=3,
                  orto_reflections: int = 0,
+                 force_linear_block_every: int = 1000000
                  ) -> None:
         super().__init__()
 
@@ -252,7 +253,13 @@ class MAE_Encoder(torch.nn.Module):
 
         self.patchify = torch.nn.Conv2d(3, emb_dim, patch_size, patch_size)
 
-        self.transformer = torch.nn.Sequential(*[OrtoBlock(emb_dim, num_head, orto_reflections=orto_reflections) for _ in range(num_layer)])
+        blks = []
+        for b in range(num_layer):
+            b_orref = 0 if (b % force_linear_block_every == 0) else orto_reflections
+            blks.append(
+                OrtoBlock(emb_dim, num_head, orto_reflections=b_orref)
+            )
+        self.transformer = torch.nn.Sequential(*blks)
 
         self.layer_norm = torch.nn.LayerNorm(emb_dim)
 
@@ -285,7 +292,6 @@ class MAE_Encoder(torch.nn.Module):
         # if return_attn_masks:
         # attns = []
         for bi, blk in enumerate(self.transformer):
-
             x_ = blk(x_)
             # attns.append(attn)
             # if bi == latent_loss_block:
@@ -315,14 +321,21 @@ class MAE_Decoder(torch.nn.Module):
                  num_layer=4,
                  num_head=3,
                  out_size: int = None,
-                 orto_reflections: int = 0
+                 orto_reflections: int = 0,
+                 force_linear_block_every: int = 1000000,
                  ) -> None:
         super().__init__()
         out_size = out_size or 3 * patch_size ** 2
         self.mask_token = torch.nn.Parameter(torch.zeros(1, 1, emb_dim))
         self.pos_embedding = torch.nn.Parameter(torch.zeros((image_size // patch_size) ** 2 + 1, 1, emb_dim))
 
-        self.transformer = torch.nn.Sequential(*[OrtoBlock(emb_dim, num_head, orto_reflections=orto_reflections) for _ in range(num_layer)])
+        blks = []
+        for b in range(num_layer):
+            b_orref = 0 if (b % force_linear_block_every == 0) else orto_reflections
+            blks.append(
+                OrtoBlock(emb_dim, num_head, orto_reflections=b_orref)
+            )
+        self.transformer = torch.nn.Sequential(*blks)
 
         self.head = torch.nn.Linear(emb_dim, out_size)
         self.patch2img = Rearrange('(h w) b (c p1 p2) -> b c (h p1) (w p2)', p1=patch_size, p2=patch_size, h=image_size//patch_size)
@@ -367,14 +380,15 @@ class MAE_ViT(torch.nn.Module):
                  latent_loss_block: int = 11,
                  latent_loss_detach_cls: bool = False,
                  orto_reflections: int = 0,
+                 force_linear_block_every: int = 100000,
                  ) -> None:
         super().__init__()
 
         # self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
         self.latent_loss_block = latent_loss_block
 
-        self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, orto_reflections=orto_reflections)
-        self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=3 * patch_size ** 2, orto_reflections=orto_reflections)
+        self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, orto_reflections=orto_reflections, force_linear_block_every=force_linear_block_every)
+        self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=3 * patch_size ** 2, orto_reflections=orto_reflections, force_linear_block_every=force_linear_block_every)
         # self.l_decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=emb_dim)
         # self.l_decoder.patch2img = nn.Identity()
 

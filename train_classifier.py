@@ -32,6 +32,7 @@ if __name__ == '__main__':
     parser.add_argument("--resolution", "--res", default=None, type=int)
     parser.add_argument("--orto_reflections", type=int, default=0)
     parser.add_argument("--depth_expansion", type=int, default=1)
+    parser.add_argument("--force_linear_block_every", type=int, default=1000000)
 
 
     args = parser.parse_args()
@@ -65,7 +66,11 @@ if __name__ == '__main__':
 
     print(vit_kwargs)
 
-    model = MAE_ViT(**vit_kwargs, image_size=args.resolution, patch_size=args.patch_size, orto_reflections=args.orto_reflections)
+    model = MAE_ViT(
+        **vit_kwargs,
+        image_size=args.resolution, patch_size=args.patch_size,
+        orto_reflections=args.orto_reflections, force_linear_block_every=args.force_linear_block_every
+    )
 
     try:
         ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')
