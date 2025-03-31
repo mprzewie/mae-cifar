@@ -403,14 +403,15 @@ class MAE_ViT(torch.nn.Module):
                  latent_loss_detach_cls: bool = False,
                  orto_reflections: int = 0,
                  force_linear_block_every: int = 100000,
+                 ortho_linear_apply_to: str=""
                  ) -> None:
         super().__init__()
 
         # self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
         self.latent_loss_block = latent_loss_block
 
-        self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, orto_reflections=orto_reflections, force_linear_block_every=force_linear_block_every)
-        self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=3 * patch_size ** 2, orto_reflections=orto_reflections, force_linear_block_every=force_linear_block_every)
+        self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, orto_reflections=orto_reflections, force_linear_block_every=force_linear_block_every, ortho_linear_apply_to=ortho_linear_apply_to)
+        self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=3 * patch_size ** 2, orto_reflections=orto_reflections, force_linear_block_every=force_linear_block_every, ortho_linear_apply_to=ortho_linear_apply_to)
         # self.l_decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=emb_dim)
         # self.l_decoder.patch2img = nn.Identity()
 

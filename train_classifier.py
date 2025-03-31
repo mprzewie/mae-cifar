@@ -70,7 +70,8 @@ if __name__ == '__main__':
     model = MAE_ViT(
         **vit_kwargs,
         image_size=args.resolution, patch_size=args.patch_size,
-        orto_reflections=args.orto_reflections, force_linear_block_every=args.force_linear_block_every
+        orto_reflections=args.orto_reflections, force_linear_block_every=args.force_linear_block_every,
+        ortho_linear_apply_to=args.ortho_linear_apply_to
     )
 
     try:
