@@ -81,6 +81,7 @@ if __name__ == '__main__':
         print("Error loading state dict, I'll train from scratch", e)
 
     writer = SummaryWriter(args.logdir)
+    print(model.encoder)
     model = ViT_Classifier(
         model.encoder, num_classes=(10 if args.ds=="cifar10" else 100 if args.ds=="cifar100" else 1000),
         linprobe=args.linprobe,
