@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import timm
 import numpy as np
@@ -183,12 +185,29 @@ class AttnBlock(Block):
 
         return x_blk
 
+
+class QKV(torch.nn.Module):
+    def __init__(self, dim: int, bias: bool=True, num_reflections: int=1, apply_to: str = ""):
+        super().__init__()
+        self.q = OrthoLinearContainer(dim, dim, bias=bias, num_reflections=num_reflections)  if "q" in apply_to else nn.Linear(dim, dim, bias=bias)
+        self.k = OrthoLinearContainer(dim, dim, bias=bias, num_reflections=num_reflections)  if "k" in apply_to else nn.Linear(dim, dim, bias=bias)
+        self.v = OrthoLinearContainer(dim, dim, bias=bias, num_reflections=num_reflections)  if "v" in apply_to else nn.Linear(dim, dim, bias=bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        q = self.q(x)
+        k = self.k(x)
+        v = self.v(x)
+        return torch.cat([q,k,v], dim=-1)
+
+
 class OrtoAttention(Attention):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., orto_reflections: int = 0):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., orto_reflections: int = 0, apply_to: str = ""):
         super().__init__(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=proj_drop)
         if orto_reflections > 0:
-            self.qkv = OrthoLinearContainer(dim, 3*dim, bias=qkv_bias, num_reflections=orto_reflections)
-            self.proj = OrthogonalLinear(dim, dim, num_reflections=orto_reflections)
+            self.qkv = QKV(dim, bias=qkv_bias, num_reflections=orto_reflections, apply_to=apply_to)
+
+            if "p" in apply_to:
+                self.proj = OrthogonalLinear(dim, dim, num_reflections=orto_reflections)
 
 
 class OrtoMlp(Mlp):
@@ -215,7 +234,7 @@ class OrtoMlp(Mlp):
 class OrtoBlock(Block):
     def __init__(
             self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0., init_values=None,
-            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, orto_reflections: int = 0):
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, orto_reflections: int = 0, apply_to: str = ""):
         super().__init__(
             dim=dim,
             num_heads=num_heads,
@@ -229,8 +248,9 @@ class OrtoBlock(Block):
             norm_layer=norm_layer
         )
         if orto_reflections:
-            self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, orto_reflections=orto_reflections)
-            self.mlp = OrtoMlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop, orto_reflections=orto_reflections)
+            self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, orto_reflections=orto_reflections, apply_to=apply_to)
+            if "r" in apply_to:
+                self.mlp = OrtoMlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop, orto_reflections=orto_reflections)
 
 
 class MAE_Encoder(torch.nn.Module):
@@ -241,7 +261,8 @@ class MAE_Encoder(torch.nn.Module):
                  num_layer=12,
                  num_head=3,
                  orto_reflections: int = 0,
-                 force_linear_block_every: int = 1000000
+                 force_linear_block_every: int = 1000000,
+                 ortho_linear_apply_to: str = ""
                  ) -> None:
         super().__init__()
 
@@ -257,7 +278,7 @@ class MAE_Encoder(torch.nn.Module):
         for b in range(num_layer):
             b_orref = 0 if (b % force_linear_block_every == 0) else orto_reflections
             blks.append(
-                OrtoBlock(emb_dim, num_head, orto_reflections=b_orref)
+                OrtoBlock(emb_dim, num_head, orto_reflections=b_orref, apply_to=ortho_linear_apply_to)
             )
         self.transformer = torch.nn.Sequential(*blks)
 
@@ -323,6 +344,7 @@ class MAE_Decoder(torch.nn.Module):
                  out_size: int = None,
                  orto_reflections: int = 0,
                  force_linear_block_every: int = 1000000,
+                 ortho_linear_apply_to: str = ""
                  ) -> None:
         super().__init__()
         out_size = out_size or 3 * patch_size ** 2
@@ -333,7 +355,7 @@ class MAE_Decoder(torch.nn.Module):
         for b in range(num_layer):
             b_orref = 0 if (b % force_linear_block_every == 0) else orto_reflections
             blks.append(
-                OrtoBlock(emb_dim, num_head, orto_reflections=b_orref)
+                OrtoBlock(emb_dim, num_head, orto_reflections=b_orref, apply_to=ortho_linear_apply_to)
             )
         self.transformer = torch.nn.Sequential(*blks)
 

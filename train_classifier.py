@@ -33,6 +33,7 @@ if __name__ == '__main__':
     parser.add_argument("--orto_reflections", type=int, default=0)
     parser.add_argument("--depth_expansion", type=int, default=1)
     parser.add_argument("--force_linear_block_every", type=int, default=1000000)
+    parser.add_argument("--ortho_linear_apply_to", type=str, default="qkvpr")
 
 
     args = parser.parse_args()
