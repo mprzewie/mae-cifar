@@ -18,6 +18,7 @@ from timm.models.layers import trunc_normal_
 from timm.models.vision_transformer import Block, Attention, LayerScale
 from torch import nn
 
+APPLY_TO_ALL = "qkvpr1r2"
 VIT_KWARGS = dict(
     vit_tiny=dict(
         emb_dim=192,
@@ -48,9 +49,13 @@ def take_indexes(sequences, indexes):
 class OrthogonalLinear(nn.Module):
     def __init__(self, in_features, out_features, bias=True, num_reflections=1):
         super().__init__()
-        assert in_features == out_features
-        features = in_features
-        self.features = features
+        # assert in_features == out_features
+        # features = in_features
+        self.in_features = in_features
+        self.out_features = out_features
+
+        features = max(in_features, out_features)
+
         self.num_chunks = num_reflections
 
         # Householder vector (N-1 parameters)
@@ -61,17 +66,17 @@ class OrthogonalLinear(nn.Module):
         # self.register_buffer("r", torch.zeros(features - 1))
 
         # Modulation vector (N parameters)
-        self.m = nn.Parameter(torch.ones(features))
+        self.m = nn.Parameter(torch.ones(out_features))
 
 
         if bias:
-            self.bias = nn.Parameter(torch.zeros(features))
+            self.bias = nn.Parameter(torch.zeros(out_features))
         else:
             self.register_parameter('bias', None)
 
     def construct_W(self):
         """Fully vectorized construction of K orthogonal matrices, outputting only the necessary rows."""
-        N = self.features
+        N = max(self.in_features, self.out_features)
         chunk_size = N // self.num_chunks  # Each chunk contributes this many rows
         device = self.r.device
 
@@ -104,7 +109,10 @@ class OrthogonalLinear(nn.Module):
         # Step 5: Concatenate Along the Correct Dimension to Form Final Weight Matrix
         W = torch.cat(torch.unbind(Q_selected, dim=0), dim=0)  # Shape: (N, N)
 
-        # Step 6: Apply Modulation
+        # Step 6: Cut out the relevant part of constructed W
+        W = W[:self.out_features, :self.in_features]
+
+        # Step 7: Apply Modulation
         W = W * self.m.unsqueeze(1)  # Apply modulation
 
         return W
@@ -114,33 +122,33 @@ class OrthogonalLinear(nn.Module):
         return torch.nn.functional.linear(x, W, self.bias)
 
 
-class OrthoLinearContainer(nn.Module):
-    def __init__(self, in_features, out_features, bias: bool=True, num_reflections: int=1):
-        super().__init__()
-
-        self.inner = nn.ModuleList()
-        self.in_features = in_features
-        self.out_features = out_features
-
-        if out_features >= in_features:
-            assert out_features % in_features == 0
-            for _ in range(out_features // in_features):
-                self.inner.append(OrthogonalLinear(in_features, in_features, bias=bias, num_reflections=num_reflections))
-        else:
-            assert in_features % out_features == 0
-            for _ in range(in_features // out_features):
-                self.inner.append(OrthogonalLinear(out_features, out_features, bias=bias, num_reflections=num_reflections))
-
-
-    def forward(self, x):
-        if self.out_features >= self.in_features:
-            inner_out = [i(x) for i in self.inner]
-            return torch.cat(inner_out, dim=-1)
-        else:
-            chunks = x.chunk(4, dim=-1)
-            outs = torch.stack([i(c) for i, c in zip(self.inner, chunks)], dim=-1).sum(dim=-1)
-            return outs
-            # assert False, (x.shape, outs.shape)
+# class OrthoLinearContainer(nn.Module):
+#     def __init__(self, in_features, out_features, bias: bool=True, num_reflections: int=1):
+#         super().__init__()
+#
+#         self.inner = nn.ModuleList()
+#         self.in_features = in_features
+#         self.out_features = out_features
+#
+#         if out_features >= in_features:
+#             assert out_features % in_features == 0
+#             for _ in range(out_features // in_features):
+#                 self.inner.append(OrthogonalLinear(in_features, in_features, bias=bias, num_reflections=num_reflections))
+#         else:
+#             assert in_features % out_features == 0
+#             for _ in range(in_features // out_features):
+#                 self.inner.append(OrthogonalLinear(out_features, out_features, bias=bias, num_reflections=num_reflections))
+#
+#
+#     def forward(self, x):
+#         if self.out_features >= self.in_features:
+#             inner_out = [i(x) for i in self.inner]
+#             return torch.cat(inner_out, dim=-1)
+#         else:
+#             chunks = x.chunk(4, dim=-1)
+#             outs = torch.stack([i(c) for i, c in zip(self.inner, chunks)], dim=-1).sum(dim=-1)
+#             return outs
+#             # assert False, (x.shape, outs.shape)
 
 
 class PatchShuffle(torch.nn.Module):
@@ -187,11 +195,11 @@ class AttnBlock(Block):
 
 
 class QKV(torch.nn.Module):
-    def __init__(self, dim: int, bias: bool=True, num_reflections: int=1, apply_to: str = ""):
+    def __init__(self, dim: int, bias: bool=True, num_reflections: int=1, apply_to: str = APPLY_TO_ALL):
         super().__init__()
-        self.q = OrthoLinearContainer(dim, dim, bias=bias, num_reflections=num_reflections)  if "q" in apply_to else nn.Linear(dim, dim, bias=bias)
-        self.k = OrthoLinearContainer(dim, dim, bias=bias, num_reflections=num_reflections)  if "k" in apply_to else nn.Linear(dim, dim, bias=bias)
-        self.v = OrthoLinearContainer(dim, dim, bias=bias, num_reflections=num_reflections)  if "v" in apply_to else nn.Linear(dim, dim, bias=bias)
+        self.q = OrthogonalLinear(dim, dim, bias=bias, num_reflections=num_reflections)  if "q" in apply_to else nn.Linear(dim, dim, bias=bias)
+        self.k = OrthogonalLinear(dim, dim, bias=bias, num_reflections=num_reflections)  if "k" in apply_to else nn.Linear(dim, dim, bias=bias)
+        self.v = OrthogonalLinear(dim, dim, bias=bias, num_reflections=num_reflections)  if "v" in apply_to else nn.Linear(dim, dim, bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         q = self.q(x)
@@ -201,7 +209,7 @@ class QKV(torch.nn.Module):
 
 
 class OrtoAttention(Attention):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., orto_reflections: int = 0, apply_to: str = ""):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL):
         super().__init__(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=proj_drop)
         if orto_reflections > 0:
             self.qkv = QKV(dim, bias=qkv_bias, num_reflections=orto_reflections, apply_to=apply_to)
@@ -228,15 +236,15 @@ class OrtoMlp(Mlp):
 
         if orto_reflections > 0:
             if "r1" in apply_to:
-                self.fc1 = OrthoLinearContainer(in_features, hidden_features, bias=bias[0], num_reflections=orto_reflections)
+                self.fc1 = OrthogonalLinear(in_features, hidden_features, bias=bias[0], num_reflections=orto_reflections)
             if "r2" in apply_to:
-                self.fc2 = OrthoLinearContainer(hidden_features, out_features, bias=bias[1], num_reflections=orto_reflections)
+                self.fc2 = OrthogonalLinear(hidden_features, out_features, bias=bias[1], num_reflections=orto_reflections)
 
 
 class OrtoBlock(Block):
     def __init__(
             self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0., init_values=None,
-            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, orto_reflections: int = 0, apply_to: str = ""):
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL):
         super().__init__(
             dim=dim,
             num_heads=num_heads,
@@ -263,7 +271,7 @@ class MAE_Encoder(torch.nn.Module):
                  num_head=3,
                  orto_reflections: int = 0,
                  force_linear_block_every: int = 1000000,
-                 ortho_linear_apply_to: str = ""
+                 ortho_linear_apply_to: str = APPLY_TO_ALL
                  ) -> None:
         super().__init__()
 
@@ -345,7 +353,7 @@ class MAE_Decoder(torch.nn.Module):
                  out_size: int = None,
                  orto_reflections: int = 0,
                  force_linear_block_every: int = 1000000,
-                 ortho_linear_apply_to: str = ""
+                 ortho_linear_apply_to: str = APPLY_TO_ALL
                  ) -> None:
         super().__init__()
         out_size = out_size or 3 * patch_size ** 2
@@ -404,7 +412,7 @@ class MAE_ViT(torch.nn.Module):
                  latent_loss_detach_cls: bool = False,
                  orto_reflections: int = 0,
                  force_linear_block_every: int = 100000,
-                 ortho_linear_apply_to: str=""
+                 ortho_linear_apply_to: str=APPLY_TO_ALL
                  ) -> None:
         super().__init__()
 
@@ -509,12 +517,15 @@ if __name__ == '__main__':
 
     img = torch.rand(2, 3, 32, 32)
     # encoder = MAE_Encoder(orto_linear=True)
-    encoder = MAE_Encoder(orto_reflections=False)
+    encoder = MAE_Encoder(orto_reflections=1)
+    opt = torch.optim.Adam(encoder.parameters(), lr=1e-3)
     # decoder = MAE_Decoder(orto_linear=True)
-    decoder = MAE_Decoder(orto_reflections=False)
+    decoder = MAE_Decoder(orto_reflections=1)
     features, fi, backward_indexes = encoder.forward(img, ratio)
     print(forward_indexes.shape)
     predicted_img, mask = decoder(features, backward_indexes)
     print(predicted_img.shape)
     loss = torch.mean((predicted_img - img) ** 2 * mask / 0.75)
+    loss.backward()
+    opt.step()
     print(loss)
