@@ -213,22 +213,24 @@ class OrtoAttention(Attention):
 class OrtoMlp(Mlp):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
     """
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, bias=True, drop=0., orto_reflections: int = 0):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, bias=True, drop=0., orto_reflections: int = 0, apply_to: str="r1r2"):
         super().__init__(
             in_features=in_features,
             hidden_features=hidden_features,
             out_features=out_features,
             act_layer=act_layer,
             bias=bias,
-            drop=drop
+            drop=drop,
         )
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
         bias = to_2tuple(bias)
 
         if orto_reflections > 0:
-            self.fc1 = OrthoLinearContainer(in_features, hidden_features, bias=bias[0], num_reflections=orto_reflections)
-            self.fc2 = OrthoLinearContainer(hidden_features, out_features, bias=bias[1], num_reflections=orto_reflections)
+            if "r1" in apply_to:
+                self.fc1 = OrthoLinearContainer(in_features, hidden_features, bias=bias[0], num_reflections=orto_reflections)
+            if "r2" in apply_to:
+                self.fc2 = OrthoLinearContainer(hidden_features, out_features, bias=bias[1], num_reflections=orto_reflections)
 
 
 class OrtoBlock(Block):
@@ -247,10 +249,9 @@ class OrtoBlock(Block):
             act_layer=act_layer,
             norm_layer=norm_layer
         )
-        if orto_reflections:
+        if orto_reflections > 0:
             self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, orto_reflections=orto_reflections, apply_to=apply_to)
-            if "r" in apply_to:
-                self.mlp = OrtoMlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop, orto_reflections=orto_reflections)
+            self.mlp = OrtoMlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop, orto_reflections=orto_reflections, apply_to=apply_to)
 
 
 class MAE_Encoder(torch.nn.Module):
