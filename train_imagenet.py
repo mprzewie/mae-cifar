@@ -343,18 +343,18 @@ group.add_argument("--arch", type=str, default="vit_base_patch14")
 group.add_argument("--orto-reflections", type=int, default=0,)
 group.add_argument("--orto-apply-to", type=str, default=APPLY_TO_ALL,)
 
-# # Batch norm parameters (only works with gen_efficientnet based models currently)
-# group = parser.add_argument_group('Batch norm parameters', 'Only works with gen_efficientnet based models currently.')
-# group.add_argument('--bn-momentum', type=float, default=None,
-#                    help='BatchNorm momentum override (if not None)')
-# group.add_argument('--bn-eps', type=float, default=None,
-#                    help='BatchNorm epsilon override (if not None)')
-# group.add_argument('--sync-bn', action='store_true',
-#                    help='Enable NVIDIA Apex or Torch synchronized BatchNorm.')
-# group.add_argument('--dist-bn', type=str, default='reduce',
-#                    help='Distribute BatchNorm stats between nodes after each epoch ("broadcast", "reduce", or "")')
-# group.add_argument('--split-bn', action='store_true',
-#                    help='Enable separate BN layers per augmentation split.')
+# Batch norm parameters (only works with gen_efficientnet based models currently)
+group = parser.add_argument_group('Batch norm parameters', 'Only works with gen_efficientnet based models currently.')
+group.add_argument('--bn-momentum', type=float, default=None,
+                   help='BatchNorm momentum override (if not None)')
+group.add_argument('--bn-eps', type=float, default=None,
+                   help='BatchNorm epsilon override (if not None)')
+group.add_argument('--sync-bn', action='store_true',
+                   help='Enable NVIDIA Apex or Torch synchronized BatchNorm.')
+group.add_argument('--dist-bn', type=str, default='reduce',
+                   help='Distribute BatchNorm stats between nodes after each epoch ("broadcast", "reduce", or "")')
+group.add_argument('--split-bn', action='store_true',
+                   help='Enable separate BN layers per augmentation split.')
 
 # Model Exponential Moving Average
 group = parser.add_argument_group('Model exponential moving average parameters')
