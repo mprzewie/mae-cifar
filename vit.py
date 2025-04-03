@@ -8,8 +8,8 @@ from torch import nn
 from model import OrtoBlock, APPLY_TO_ALL
 
 ARCH_KWARGS={
-    "vit_tiny_patch16": dict(patch_size=14, embed_dim=192, depth=12, num_heads=3),
-    "vit_base_patch16": dict(patch_size=14, embed_dim=768, depth=12, num_heads=12)
+    "vit_tiny_patch14": dict(patch_size=14, embed_dim=192, depth=12, num_heads=3),
+    "vit_base_patch14": dict(patch_size=14, embed_dim=768, depth=12, num_heads=12)
 }
 
 def orto_vit(
