@@ -260,9 +260,9 @@ class OrtoBlock(Block):
             norm_layer=norm_layer,
             mlp_layer=mlp_layer
         )
-        self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, orto_reflections=orto_reflections, apply_to=apply_to)
+        self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=proj_drop, orto_reflections=orto_reflections, apply_to=apply_to)
         if "r" in apply_to:
-            self.mlp = OrtoMlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=drop, orto_reflections=orto_reflections)
+            self.mlp = OrtoMlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=proj_drop, orto_reflections=orto_reflections)
 
 
 class MAE_Encoder(torch.nn.Module):
