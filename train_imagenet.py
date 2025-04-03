@@ -337,6 +337,8 @@ group.add_argument('--drop-path', type=float, default=None, metavar='PCT',
 # group.add_argument('--drop-block', type=float, default=None, metavar='PCT',
 #                    help='Drop block rate (default: None)')
 
+group.add_argument("--arch", type=str, default="vit_base_patch14")
+
 # orto stuff
 group.add_argument("--orto-reflections", type=int, default=0,)
 group.add_argument("--orto-apply-to", type=int, default=APPLY_TO_ALL,)
@@ -489,7 +491,7 @@ def main():
     #     )
 
     model = orto_vit(
-        arch="vit_base_patch16",
+        arch="vit_base_patch14",
         input_size=args.input_size,
         num_classes=args.num_classes,
         drop_rate=args.drop,
