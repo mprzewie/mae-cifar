@@ -665,8 +665,8 @@ def main():
         model = torch.compile(model, backend=args.torchcompile, mode=args.torchcompile_mode)
 
     # create the train and eval datasets
-    if args.data and not args.data_dir:
-        args.data_dir = args.data
+    # if args.data and not args.data_dir:
+    #     args.data_dir = args.data
     if args.input_img_mode is None:
         input_img_mode = 'RGB' if data_config['input_size'][0] == 3 else 'L'
     else:
