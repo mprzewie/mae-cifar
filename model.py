@@ -1,3 +1,4 @@
+from email.policy import default
 from typing import Optional
 
 import torch
@@ -57,7 +58,8 @@ class OrthogonalLinear(nn.Module):
 
         features = max(in_features, out_features)
 
-        self.num_chunks = num_reflections
+        # self.num_chunks = num_reflections
+        assert num_reflections == 1
 
         # Householder vector (N-1 parameters)
         self.v = nn.Parameter(torch.randn(num_reflections, features - 1))
@@ -78,37 +80,32 @@ class OrthogonalLinear(nn.Module):
     def construct_W(self):
         """Fully vectorized construction of K orthogonal matrices, outputting only the necessary rows."""
         N = max(self.in_features, self.out_features)
-        chunk_size = N // self.num_chunks  # Each chunk contributes this many rows
+        # chunk_size = N // self.num_chunks  # Each chunk contributes this many rows
         device = self.r.device
 
         # Step 1: Construct Skew-Symmetric Rotation Matrices for Each Chunk
-        R = torch.zeros((self.num_chunks, N, N), device=device)  # Shape: (K, N, N)
+        R = torch.zeros((N, N), device=device)  # Shape: (K, N, N)
 
         # Correctly assign N-1 parameters per chunk to ensure skew-symmetry
         indices = torch.arange(1, N, device=device)
 
         # Fix: Now `self.r` is of shape (K, N-1) to allow independent rotations per chunk
-        R[:, 0, indices] = self.r  # Rotate e2,...,eN around e1 for each chunk
-        R[:, indices, 0] = -self.r  # Ensure skew-symmetry
+        R[0, indices] = self.r  # Rotate e2,...,eN around e1 for each chunk
+        R[indices, 0] = -self.r  # Ensure skew-symmetry
 
         # Compute full batch of orthogonal rotation matrices
         Q_rotated = torch.matrix_exp(R)  # Shape: (K, N, N)
 
-        # Step 2: Compute Householder Reflections in a Batch
-        v_full = torch.cat([torch.ones(self.num_chunks, 1, device=device), self.v], dim=1)  # Shape: (K, N)
-        v_full = v_full / v_full.norm(dim=1, keepdim=True)  # Normalize each vector
+        # # Step 1: Givens rotations:
+        # basis = torch.eye()
 
-        H = torch.eye(N, device=device).expand(self.num_chunks, N, N) - \
-            2 * v_full.unsqueeze(2) @ v_full.unsqueeze(1)  # Shape: (K, N, N)
+        # Step 2: Compute Householder Reflection (Fixing e1 -> v1)
+        v_full = torch.cat([torch.tensor([1.0], device=device), self.v])  # Extend to full size
+        v_full = v_full / v_full.norm()  # Normalize to be a unit vector
+        H = torch.eye(N, device=device) - 2 * torch.outer(v_full, v_full)  # Householder matrix
 
         # Step 3: Apply Householder Reflection After Rotation
-        Q = H @ Q_rotated  # Shape: (K, N, N)
-
-        # Step 4: Select Only the First `chunk_size` Rows From Each Chunk
-        Q_selected = Q[:, :chunk_size, :]  # Shape: (K, N//K, N)
-
-        # Step 5: Concatenate Along the Correct Dimension to Form Final Weight Matrix
-        W = torch.cat(torch.unbind(Q_selected, dim=0), dim=0)  # Shape: (N, N)
+        W = H @ Q_rotated
 
         # Step 6: Cut out the relevant part of constructed W
         W = W[:self.out_features, :self.in_features]
@@ -512,23 +509,61 @@ class ViT_Classifier(torch.nn.Module):
 
 
 if __name__ == '__main__':
-    shuffle = PatchShuffle()
-    ratio = 0.75
-    a = torch.rand(16, 2, 10)
-    b, forward_indexes, backward_indexes = shuffle(a, ratio)
-    print(b.shape)
+    from time import time
+    from collections import defaultdict
 
-    img = torch.rand(2, 3, 32, 32)
-    # encoder = MAE_Encoder(orto_linear=True)
-    encoder = MAE_Encoder(orto_reflections=1)
-    opt = torch.optim.Adam(encoder.parameters(), lr=1e-3)
-    # decoder = MAE_Decoder(orto_linear=True)
-    decoder = MAE_Decoder(orto_reflections=1)
-    features, fi, backward_indexes = encoder.forward(img, ratio)
-    print(forward_indexes.shape)
-    predicted_img, mask = decoder(features, backward_indexes)
-    print(predicted_img.shape)
-    loss = torch.mean((predicted_img - img) ** 2 * mask / 0.75)
-    loss.backward()
-    opt.step()
-    print(loss)
+    results = dict(
+        l11=defaultdict(list),
+        l14=defaultdict(list),
+        o11=defaultdict(list),
+        o14=defaultdict(list),
+    )
+
+    for emb in [192, 512, 768, 1024, 2048]:
+        x = torch.randn((10, emb))
+
+        lrs = dict(
+            l11=nn.Linear(emb, emb),
+            l14 = nn.Linear(emb, 4 * emb),
+            o11 = OrthogonalLinear(emb, emb),
+            o14 = OrthogonalLinear(emb, 4 * emb),
+        )
+
+        for _ in range(10):
+            for l_name, l in lrs.items():
+                s = time()
+                y = l(x)
+                t = time()
+                results[l_name][emb].append(t-s)
+
+        print(emb, {lr_name: np.mean(results[lr_name][emb]) for lr_name in lrs.keys()})
+
+    import matplotlib.pyplot as plt
+    for lr_name in list(results.keys()):
+        X = sorted(results[lr_name].keys())
+        Y = [np.mean(results[lr_name][emb]) for emb in X]
+        std = [np.std(results[lr_name][emb]) for emb in X]
+        plt.errorbar(X, Y, yerr=std, label=lr_name)
+
+    plt.show()
+
+    # shuffle = PatchShuffle()
+    # ratio = 0.75
+    # a = torch.rand(16, 2, 10)
+    # b, forward_indexes, backward_indexes = shuffle(a, ratio)
+    # print(b.shape)
+    #
+    # img = torch.rand(2, 3, 32, 32)
+    # # encoder = MAE_Encoder(orto_linear=True)
+    # encoder = MAE_Encoder(orto_reflections=1)
+    # opt = torch.optim.Adam(encoder.parameters(), lr=1e-3)
+    # # decoder = MAE_Decoder(orto_linear=True)
+    # decoder = MAE_Decoder(orto_reflections=1)
+    # features, fi, backward_indexes = encoder.forward(img, ratio)
+    # print(forward_indexes.shape)
+    # predicted_img, mask = decoder(features, backward_indexes)
+    # print(predicted_img.shape)
+    # loss = torch.mean((predicted_img - img) ** 2 * mask / 0.75)
+    # loss.backward()
+    # opt.step()
+    # print(loss)
