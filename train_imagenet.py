@@ -332,7 +332,7 @@ group.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                    help='Dropout rate (default: 0.)')
 group.add_argument('--drop-connect', type=float, default=None, metavar='PCT',
                    help='Drop connect rate, DEPRECATED, use drop-path (default: None)')
-group.add_argument('--drop-path', type=float, default=None, metavar='PCT',
+group.add_argument('--drop-path', type=float, default=0, metavar='PCT',
                    help='Drop path rate (default: None)')
 # group.add_argument('--drop-block', type=float, default=None, metavar='PCT',
 #                    help='Drop block rate (default: None)')
