@@ -93,11 +93,20 @@ class OrthogonalLinear(nn.Module):
         R[0, indices] = self.r  # Rotate e2,...,eN around e1 for each chunk
         R[indices, 0] = -self.r  # Ensure skew-symmetry
 
-        # Compute full batch of orthogonal rotation matrices
-        Q_rotated = torch.matrix_exp(R)  # Shape: (K, N, N)
+        # # Compute full batch of orthogonal rotation matrices
+        # Q_rotated = torch.matrix_exp(R)  # Shape: (K, N, N)
 
-        # # Step 1: Givens rotations:
-        # basis = torch.eye()
+        # Rodrigues' Formula
+        theta = self.r.norm() + 1e-8
+        A = R / theta
+        Q_rot2 = (
+                torch.eye(R.shape[0], device=R.device)
+                + torch.sin(theta) * A
+                + (1 - torch.cos(theta)) * (A @ A)
+        )
+        Q_rotated = Q_rot2
+        # assert torch.allclose(Q_rotated, Q_rot2, rtol=1e-4), (Q_rotated - Q_rot2).abs().max()
+
 
         # Step 2: Compute Householder Reflection (Fixing e1 -> v1)
         v_full = torch.cat([torch.tensor([1.0], device=device), self.v])  # Extend to full size
@@ -519,7 +528,7 @@ if __name__ == '__main__':
         o14=defaultdict(list),
     )
 
-    for emb in [192, 512, 768, 1024, 2048]:
+    for emb in [192, 512]: # 768, 1024, 2048]:
         x = torch.randn((10, emb))
 
         lrs = dict(
@@ -529,7 +538,8 @@ if __name__ == '__main__':
             o14 = OrthogonalLinear(emb, 4 * emb),
         )
 
-        for _ in range(10):
+        from tqdm import tqdm
+        for _ in tqdm(range(10)):
             for l_name, l in lrs.items():
                 s = time()
                 y = l(x)
