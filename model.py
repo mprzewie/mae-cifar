@@ -62,10 +62,10 @@ class OrthogonalLinear(nn.Module):
         assert num_reflections == 1
 
         # Householder vector (N-1 parameters)
-        self.v = nn.Parameter(torch.randn(num_reflections, features - 1))
+        self.v = nn.Parameter(torch.randn(features - 1))
 
         # Rotation vectors for each chunk (num_chunks x (N-1))
-        self.r = nn.Parameter(torch.randn(num_reflections, features - 1) * 0.1)
+        self.r = nn.Parameter(torch.randn(features - 1) * 0.1)
         # self.register_buffer("r", torch.zeros(features - 1))
 
         # Modulation vector (N parameters)
