@@ -793,7 +793,7 @@ def main():
 
     # HELIOS-specific affinity trick
     for loader in [loader_train, loader_eval]:
-        ld = loader if not args.use_prefetcher else loader.loader
+        ld = loader if not args.prefetcher else loader.loader
         wif = ld.worker_init_fn
         def _worker_init_fn(worker_id):
             os.sched_setaffinity(0, range(os.cpu_count()))
