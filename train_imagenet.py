@@ -341,7 +341,7 @@ group.add_argument("--arch", type=str, default="vit_base_patch14")
 
 # orto stuff
 group.add_argument("--orto-reflections", type=int, default=0,)
-group.add_argument("--orto-apply-to", type=int, default=APPLY_TO_ALL,)
+group.add_argument("--orto-apply-to", type=str, default=APPLY_TO_ALL,)
 
 # # Batch norm parameters (only works with gen_efficientnet based models currently)
 # group = parser.add_argument_group('Batch norm parameters', 'Only works with gen_efficientnet based models currently.')
