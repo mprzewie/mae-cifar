@@ -7,6 +7,7 @@ import numpy as np
 from einops import repeat, rearrange
 from einops.layers.torch import Rearrange
 
+from timm.models.vision_transformer import Mlp
 try:
     from timm.layers.helpers import to_2tuple
     from timm.layers.mlp import Mlp

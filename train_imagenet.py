@@ -42,6 +42,7 @@ from timm.optim import create_optimizer_v2, optimizer_kwargs
 from timm.scheduler import create_scheduler_v2, scheduler_kwargs
 from timm.utils import ApexScaler, NativeScaler
 
+from model import APPLY_TO_ALL
 from vit import orto_vit
 
 try:
@@ -82,8 +83,8 @@ parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 # Dataset parameters
 group = parser.add_argument_group('Dataset parameters')
 # Keep this argument outside the dataset group because it is positional.
-parser.add_argument('data', nargs='?', metavar='DIR', const=None,
-                    help='path to dataset (positional is *deprecated*, use --data-dir)')
+# parser.add_argument('data', nargs='?', metavar='DIR', const=None,
+#                     help='path to dataset (positional is *deprecated*, use --data-dir)')
 group.add_argument('--data-dir', metavar='DIR',
                     help='path to dataset (root dir)')
 group.add_argument('--dataset', metavar='NAME', default='',
@@ -131,7 +132,7 @@ group.add_argument('--img-size', type=int, default=None, metavar='N',
                    help='Image size (default: None => model default)')
 # group.add_argument('--in-chans', type=int, default=None, metavar='N',
 #                    help='Image input channels (default: None => 3)')
-group.add_argument('--input-size', default=None, nargs=3, type=int, metavar='N',
+group.add_argument('--input-size', default=[3, 224, 224], nargs=3, type=int, metavar='N',
                    help='Input all image dimensions (d h w, e.g. --input-size 3 224 224), uses model default if empty')
 group.add_argument('--crop-pct', default=None, type=float,
                    metavar='N', help='Input image center crop percent (for validation only)')
@@ -336,6 +337,10 @@ group.add_argument('--drop-path', type=float, default=None, metavar='PCT',
 # group.add_argument('--drop-block', type=float, default=None, metavar='PCT',
 #                    help='Drop block rate (default: None)')
 
+# orto stuff
+group.add_argument("--orto-reflections", type=int, default=0,)
+group.add_argument("--orto-apply-to", type=int, default=APPLY_TO_ALL,)
+
 # # Batch norm parameters (only works with gen_efficientnet based models currently)
 # group = parser.add_argument_group('Batch norm parameters', 'Only works with gen_efficientnet based models currently.')
 # group.add_argument('--bn-momentum', type=float, default=None,
@@ -484,11 +489,13 @@ def main():
     #     )
 
     model = orto_vit(
-        arch=...,
+        arch="vit_base_patch16",
         input_size=args.input_size,
         num_classes=args.num_classes,
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,
+        orto_reflections=args.orto_reflections,
+        orto_apply_to=args.orto_apply_to,
     )
 
     # model = create_model(
