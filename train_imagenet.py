@@ -112,8 +112,8 @@ group.add_argument('--dataset-trust-remote-code', action='store_true', default=F
 
 # Model parameters
 group = parser.add_argument_group('Model parameters')
-group.add_argument('--model', default='resnet50', type=str, metavar='MODEL',
-                   help='Name of model to train (default: "resnet50")')
+group.add_argument('--model', default='vit_base_patch14', type=str, metavar='MODEL',
+                   help='Name of model to train')
 # group.add_argument('--pretrained', action='store_true', default=False,
 #                    help='Start with pretrained version of specified network (if avail)')
 # group.add_argument('--pretrained-path', default=None, type=str,
@@ -337,8 +337,6 @@ group.add_argument('--drop-path', type=float, default=0, metavar='PCT',
 # group.add_argument('--drop-block', type=float, default=None, metavar='PCT',
 #                    help='Drop block rate (default: None)')
 
-group.add_argument("--arch", type=str, default="vit_base_patch14")
-
 # orto stuff
 group.add_argument("--orto-reflections", type=int, default=0,)
 group.add_argument("--orto-apply-to", type=str, default=APPLY_TO_ALL,)
@@ -491,7 +489,7 @@ def main():
     #     )
 
     model = orto_vit(
-        arch="vit_base_patch14",
+        arch=args.model,
         input_size=args.input_size,
         num_classes=args.num_classes,
         drop_rate=args.drop,
@@ -792,6 +790,15 @@ def main():
             device=device,
             use_prefetcher=args.prefetcher,
         )
+
+    # HELIOS-specific affinity trick
+    for loader in [loader_train, loader_eval]:
+        wif = loader.worker_init_fn
+        def _worker_init_fn(worker_id):
+            os.sched_setaffinity(0, range(os.cpu_count()))
+            wif(worker_id)
+
+        loader.worker_init_fn = _worker_init_fn
 
     # setup loss function
     if args.jsd_loss:
