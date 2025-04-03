@@ -793,12 +793,13 @@ def main():
 
     # HELIOS-specific affinity trick
     for loader in [loader_train, loader_eval]:
-        wif = loader.worker_init_fn
+        ld = loader if not args.use_prefetcher else loader.loader
+        wif = ld.worker_init_fn
         def _worker_init_fn(worker_id):
             os.sched_setaffinity(0, range(os.cpu_count()))
             wif(worker_id)
 
-        loader.worker_init_fn = _worker_init_fn
+        ld.worker_init_fn = _worker_init_fn
 
     # setup loss function
     if args.jsd_loss:
