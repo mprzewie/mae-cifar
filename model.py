@@ -210,11 +210,10 @@ class QKV(torch.nn.Module):
 
 
 class OrtoAttention(Attention):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL):
-        super().__init__(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=proj_drop)
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_norm: bool = False, attn_drop=0., proj_drop=0., norm_layer: nn.Module = nn.LayerNorm, orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL):
+        super().__init__(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_norm=qk_norm, attn_drop=attn_drop, proj_drop=proj_drop, norm_layer=norm_layer)
         if orto_reflections > 0:
             self.qkv = QKV(dim, bias=qkv_bias, num_reflections=orto_reflections, apply_to=apply_to)
-
             if "p" in apply_to:
                 self.proj = OrthogonalLinear(dim, dim, num_reflections=orto_reflections)
 
@@ -244,19 +243,22 @@ class OrtoMlp(Mlp):
 
 class OrtoBlock(Block):
     def __init__(
-            self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0., init_values=None,
-            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL):
+            self,
+            dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_norm: bool=False, drop=0., attn_drop=0., init_values=None,
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_layer: nn.Module = Mlp, orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL):
         super().__init__(
             dim=dim,
             num_heads=num_heads,
             mlp_ratio=mlp_ratio,
             qkv_bias=qkv_bias,
+            qk_norm=qk_norm,
             proj_drop=drop,
             attn_drop=attn_drop,
             init_values=init_values,
             drop_path=drop_path,
             act_layer=act_layer,
-            norm_layer=norm_layer
+            norm_layer=norm_layer,
+            mlp_layer=mlp_layer
         )
         self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, orto_reflections=orto_reflections, apply_to=apply_to)
         if "r" in apply_to:
