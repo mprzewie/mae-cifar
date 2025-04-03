@@ -244,7 +244,7 @@ class OrtoMlp(Mlp):
 class OrtoBlock(Block):
     def __init__(
             self,
-            dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_norm: bool=False, drop=0., attn_drop=0., init_values=None,
+            dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_norm: bool=False, proj_drop=0., attn_drop=0., init_values=None,
             drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_layer: nn.Module = Mlp, orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL):
         super().__init__(
             dim=dim,
@@ -252,7 +252,7 @@ class OrtoBlock(Block):
             mlp_ratio=mlp_ratio,
             qkv_bias=qkv_bias,
             qk_norm=qk_norm,
-            proj_drop=drop,
+            proj_drop=proj_drop,
             attn_drop=attn_drop,
             init_values=init_values,
             drop_path=drop_path,
