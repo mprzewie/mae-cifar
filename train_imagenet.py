@@ -463,7 +463,7 @@ def main():
             assert args.amp_dtype == 'float16'
         else:
             use_amp = 'native'
-            assert args.amp_dtype in ('float16', 'bfloat16')
+            assert args.amp_dtype in ('float16', 'bfloat16', 'float32')
         if args.amp_dtype == 'bfloat16':
             amp_dtype = torch.bfloat16
 
