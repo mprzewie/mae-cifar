@@ -49,16 +49,17 @@ def take_indexes(sequences, indexes):
 
 
 class OrthogonalLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias=True, num_reflections=1):
+    def __init__(
+            self, in_features: int, out_features: int, bias: bool=True,
+            num_reflections=1, forward_impl: str="fast"
+    ):
         super().__init__()
-        # assert in_features == out_features
-        # features = in_features
+
         self.in_features = in_features
         self.out_features = out_features
 
         features = max(in_features, out_features)
 
-        # self.num_chunks = num_reflections
         assert num_reflections == 1
 
         # Householder vector (N-1 parameters)
@@ -66,21 +67,20 @@ class OrthogonalLinear(nn.Module):
 
         # Rotation vectors for each chunk (num_chunks x (N-1))
         self.r = nn.Parameter(torch.randn(features - 1) * 0.1)
-        # self.register_buffer("r", torch.zeros(features - 1))
 
         # Modulation vector (N parameters)
         self.m = nn.Parameter(torch.ones(out_features))
-
 
         if bias:
             self.bias = nn.Parameter(torch.zeros(out_features))
         else:
             self.register_parameter('bias', None)
 
+        self.forward_impl = forward_impl
+
     def construct_W(self):
         """Fully vectorized construction of K orthogonal matrices, outputting only the necessary rows."""
         N = max(self.in_features, self.out_features)
-        # chunk_size = N // self.num_chunks  # Each chunk contributes this many rows
         device = self.r.device
 
         # Step 1: Construct Skew-Symmetric Rotation Matrices for Each Chunk
@@ -89,7 +89,6 @@ class OrthogonalLinear(nn.Module):
         # Correctly assign N-1 parameters per chunk to ensure skew-symmetry
         indices = torch.arange(1, N, device=device)
 
-        # Fix: Now `self.r` is of shape (K, N-1) to allow independent rotations per chunk
         R[0, indices] = self.r  # Rotate e2,...,eN around e1 for each chunk
         R[indices, 0] = -self.r  # Ensure skew-symmetry
 
@@ -106,7 +105,6 @@ class OrthogonalLinear(nn.Module):
         )
         Q_rotated = Q_rot2
         # assert torch.allclose(Q_rotated, Q_rot2, rtol=1e-4), (Q_rotated - Q_rot2).abs().max()
-
 
         # Step 2: Compute Householder Reflection (Fixing e1 -> v1)
         v_full = torch.cat([torch.tensor([1.0], device=device), self.v])  # Extend to full size
@@ -125,6 +123,77 @@ class OrthogonalLinear(nn.Module):
         return W
 
     def forward(self, x):
+
+        if self.forward_impl == "fast":
+            return self.fast_forward(x)
+        elif self.forward_impl == "slow":
+            return self.slow_forward(x)
+        elif self.forward_impl == "safe":
+            out_slow = self.slow_forward(x)
+            out_fast = self.fast_forward(x)
+            assert torch.allclose(out_fast, out_slow, atol=1e-5)
+            return out_fast
+
+        assert False, "unknown forward implementation"
+
+    @staticmethod
+    def apply_ortho_operator(x, r, v, m):
+        """
+        Apply exp(R) x where R is skew-symmetric with nonzeros in first row/col defined by r.
+        x: (B, N)
+        r: (N - 1,)
+        """
+        device = x.device
+        B, I = x.shape
+        O = len(m)
+        N = max(I, O)
+        # I = in_features, O = out_features, N = processing size
+
+        if O > I:
+            # if in size is lower, pad with zeros
+            pad = torch.zeros(B, O - I, device=device)
+            x = torch.cat((x, pad), dim=1)
+
+        theta = r.norm() + 1e-8
+
+        r_full = torch.zeros(N, device=device)
+        r_full[1:] = r
+        r_unit = r_full / theta  # same normalization as A = R / θ
+
+        x0 = x[:, 0].unsqueeze(1)
+        r_dot_x = torch.sum(x * r_unit, dim=1, keepdim=True)  # scalar per example
+
+        e1 = torch.zeros(N, device=device)
+        e1[0] = 1.0
+        Ax_fast = r_dot_x * e1.unsqueeze(0) - x0 * r_unit.unsqueeze(0)   # (B, N)
+
+        Ax0 = Ax_fast[:, 0].unsqueeze(1)
+        r_dot_Ax = torch.sum(Ax_fast * r_unit, dim=1, keepdim=True)
+        A2x_fast = r_dot_Ax * e1.unsqueeze(0) - Ax0 * r_unit.unsqueeze(0)
+
+        x_rot = x + torch.sin(theta) * Ax_fast + (1 - torch.cos(theta)) * A2x_fast
+
+        # # Step 3: Apply Householder Reflection: Hx = x - 2vvᵀx / ‖v‖²
+        v_full = torch.cat([torch.tensor([1.0], device=device), v])  # Extend v with 1 for full vector
+        v_full = v_full / v_full.norm()  # Normalize v
+        v_proj = torch.matmul(x_rot, v_full.unsqueeze(-1))  # Project x_rot onto v_full (B, N) * (N, 1) → (B, 1)
+        v_proj = v_proj * v_full.unsqueeze(0)  # Broadcasting to (B, N)
+
+        x_ref = x_rot - 2 * v_proj
+
+        if O < I:
+            # if out size is lower, cutout the latter part
+            x_ref = x_ref[:, :O]
+
+        # # Step 4: Apply modulation (scaling each vector by m)
+        modulated = x_ref * m.unsqueeze(0)  # Apply modulation across the batch (B, N)
+
+        return modulated
+
+    def fast_forward(self, x):
+        return self.apply_ortho_operator(x, self.r, self.v, self.m) + self.bias
+
+    def slow_forward(self, x):
         W = self.construct_W()
         return torch.nn.functional.linear(x, W, self.bias)
 
@@ -149,33 +218,14 @@ class OrthogonalLinear(nn.Module):
         assert torch.allclose(row_norms, self.m.abs(), atol=eps), "Row norms not equal to m"
         print("W-orthogonal unittest OK")
 
-# class OrthoLinearContainer(nn.Module):
-#     def __init__(self, in_features, out_features, bias: bool=True, num_reflections: int=1):
-#         super().__init__()
-#
-#         self.inner = nn.ModuleList()
-#         self.in_features = in_features
-#         self.out_features = out_features
-#
-#         if out_features >= in_features:
-#             assert out_features % in_features == 0
-#             for _ in range(out_features // in_features):
-#                 self.inner.append(OrthogonalLinear(in_features, in_features, bias=bias, num_reflections=num_reflections))
-#         else:
-#             assert in_features % out_features == 0
-#             for _ in range(in_features // out_features):
-#                 self.inner.append(OrthogonalLinear(out_features, out_features, bias=bias, num_reflections=num_reflections))
-#
-#
-#     def forward(self, x):
-#         if self.out_features >= self.in_features:
-#             inner_out = [i(x) for i in self.inner]
-#             return torch.cat(inner_out, dim=-1)
-#         else:
-#             chunks = x.chunk(4, dim=-1)
-#             outs = torch.stack([i(c) for i, c in zip(self.inner, chunks)], dim=-1).sum(dim=-1)
-#             return outs
-#             # assert False, (x.shape, outs.shape)
+    def _unittest_fast_forward(self, B=10, eps=1e-5):
+        x = torch.randn(B, self.in_features)
+
+        out_slow = self.forward(x)
+        out_fast = self.fast_forward(x)
+
+        assert torch.allclose(out_slow, out_fast, atol=eps), "Fast implementation has errors"
+        print("Fast unittest OK")
 
 
 class PatchShuffle(torch.nn.Module):
@@ -544,27 +594,34 @@ if __name__ == '__main__':
     from collections import defaultdict
 
     OrthogonalLinear(512, 512)._unittest_w_orthogonality()
-    exit()
+    OrthogonalLinear(512, 512)._unittest_fast_forward()
+
 
     results = dict(
         l11=defaultdict(list),
         l14=defaultdict(list),
+        l41=defaultdict(list),
         o11=defaultdict(list),
         o11f=defaultdict(list),
+        o11s=defaultdict(list),
         o14=defaultdict(list),
         o14f=defaultdict(list),
+        o14s=defaultdict(list),
+        o41f=defaultdict(list),
     )
 
-    for emb in [192, 512, 768, 1024, 2048]:
+    for emb in [192, 512, 768, 1024]: #, 2048]:
         x = torch.randn((10, emb))
 
         lrs = dict(
             l11=nn.Linear(emb, emb),
-            # l14 = nn.Linear(emb, 4 * emb),
-            o11 = OrthogonalLinear(emb, emb),
-            # o11f = OrthogonalLinear(emb, emb).fast_forward,
-            # o14 = OrthogonalLinear(emb, 4 * emb),
-            # o14f = OrthogonalLinear(emb, 4 * emb).fast_forward,
+            l14 = nn.Linear(emb, 4 * emb),
+            l41 = nn.Linear(emb, emb // 4),
+            # o11 = OrthogonalLinear(emb, emb, forward_impl="slow"),
+            # o11f = OrthogonalLinear(emb, emb, forward_impl="fast"),
+            o11f = OrthogonalLinear(emb, emb, forward_impl="fast"),
+            o14f = OrthogonalLinear(emb, 4 * emb, forward_impl="fast"),
+            o41f = OrthogonalLinear(emb, emb//4, forward_impl="fast")
 
         )
 
@@ -574,6 +631,7 @@ if __name__ == '__main__':
                 s = time()
                 y = l(x)
                 t = time()
+                # print(l_name)
                 results[l_name][emb].append(t-s)
 
         print(emb, {lr_name: np.mean(results[lr_name][emb]) for lr_name in lrs.keys()})
@@ -583,7 +641,8 @@ if __name__ == '__main__':
         X = sorted(results[lr_name].keys())
         Y = [np.mean(results[lr_name][emb]) for emb in X]
         std = [np.std(results[lr_name][emb]) for emb in X]
-        plt.errorbar(X, Y, yerr=std, label=lr_name)
+        ls = "-" if "l" in lr_name else "--"
+        plt.errorbar(X, Y, yerr=std, label=lr_name, linestyle=ls)
 
     plt.legend()
     plt.show()
