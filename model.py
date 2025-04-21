@@ -128,6 +128,26 @@ class OrthogonalLinear(nn.Module):
         W = self.construct_W()
         return torch.nn.functional.linear(x, W, self.bias)
 
+    def _unittest_w_orthogonality(self, eps=1e-5):
+        W = self.construct_W()
+        # for i in range(W.shape[0]):
+        #     for j in range(W.shape[1]):
+        #         if i!= j:
+        #             wi = W[i]
+        #             wj = W[j]
+        #             dot = (wi * wj).sum()
+        #             assert torch.isclose(dot, torch.tensor(0.0, device=W.device), atol=eps), f"Rows {i}, {j} not orthogonal: dot={dot.item():.3e}"
+
+        G = W @ W.T  # Gram matrix of row vectors
+        G_diag = torch.diagonal(G)
+        off_diag = G - torch.diag(G_diag)
+        assert torch.allclose(off_diag, torch.zeros_like(off_diag), atol=eps), "W is not row-orthogonal" # Check if it's close to diagonal
+
+        assert torch.allclose(G_diag, self.m ** 2, atol=eps), "Diagonal should be equal to m^2"
+
+        row_norms = W.norm(dim=1)
+        assert torch.allclose(row_norms, self.m.abs(), atol=eps), "Row norms not equal to m"
+        print("W-orthogonal unittest OK")
 
 # class OrthoLinearContainer(nn.Module):
 #     def __init__(self, in_features, out_features, bias: bool=True, num_reflections: int=1):
@@ -517,25 +537,35 @@ class ViT_Classifier(torch.nn.Module):
         return logits
 
 
+
+
 if __name__ == '__main__':
     from time import time
     from collections import defaultdict
+
+    OrthogonalLinear(512, 512)._unittest_w_orthogonality()
+    exit()
 
     results = dict(
         l11=defaultdict(list),
         l14=defaultdict(list),
         o11=defaultdict(list),
+        o11f=defaultdict(list),
         o14=defaultdict(list),
+        o14f=defaultdict(list),
     )
 
-    for emb in [192, 512]: # 768, 1024, 2048]:
+    for emb in [192, 512, 768, 1024, 2048]:
         x = torch.randn((10, emb))
 
         lrs = dict(
             l11=nn.Linear(emb, emb),
-            l14 = nn.Linear(emb, 4 * emb),
+            # l14 = nn.Linear(emb, 4 * emb),
             o11 = OrthogonalLinear(emb, emb),
-            o14 = OrthogonalLinear(emb, 4 * emb),
+            # o11f = OrthogonalLinear(emb, emb).fast_forward,
+            # o14 = OrthogonalLinear(emb, 4 * emb),
+            # o14f = OrthogonalLinear(emb, 4 * emb).fast_forward,
+
         )
 
         from tqdm import tqdm
@@ -555,7 +585,9 @@ if __name__ == '__main__':
         std = [np.std(results[lr_name][emb]) for emb in X]
         plt.errorbar(X, Y, yerr=std, label=lr_name)
 
+    plt.legend()
     plt.show()
+
 
     # shuffle = PatchShuffle()
     # ratio = 0.75
