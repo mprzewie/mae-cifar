@@ -191,7 +191,9 @@ class OrthogonalLinear(nn.Module):
         return modulated
 
     def fast_forward(self, x):
-        return self.apply_ortho_operator(x, self.r, self.v, self.m) + self.bias
+        Wx = self.apply_ortho_operator(x, self.r, self.v, self.m)
+
+        return Wx if self.bias is None else Wx + self.bias
 
     def slow_forward(self, x):
         W = self.construct_W()
