@@ -51,7 +51,7 @@ def take_indexes(sequences, indexes):
 class OrthogonalLinear(nn.Module):
     def __init__(
             self, in_features: int, out_features: int, bias: bool=True,
-            num_reflections=1, forward_impl: str="fast"
+            num_reflections=1, forward_impl: str="slow"
     ):
         super().__init__()
 
