@@ -144,7 +144,8 @@ class OrthogonalLinear(nn.Module):
         r: (N - 1,)
         """
         device = x.device
-        B, I = x.shape
+        B = x.shape[0]
+        I = x.shape[-1]
         O = len(m)
         N = max(I, O)
         # I = in_features, O = out_features, N = processing size
