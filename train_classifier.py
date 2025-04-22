@@ -32,6 +32,7 @@ if __name__ == '__main__':
     parser.add_argument("--resolution", "--res", default=None, type=int)
     parser.add_argument("--orto_reflections", type=int, default=0)
     parser.add_argument("--depth_expansion", type=int, default=1)
+    parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--force_linear_block_every", type=int, default=1000000)
     parser.add_argument("--ortho_linear_apply_to", type=str, default="qkvpr")
 
@@ -56,8 +57,8 @@ if __name__ == '__main__':
     def worker_init_fn(worker_id):
         os.sched_setaffinity(0, range(os.cpu_count()))
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4, worker_init_fn=worker_init_fn)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, load_batch_size, shuffle=False, num_workers=4, worker_init_fn=worker_init_fn)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=args.num_workers, worker_init_fn=worker_init_fn)
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, load_batch_size, shuffle=False, num_workers=args.num_workers, worker_init_fn=worker_init_fn)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     vit_kwargs = VIT_KWARGS[args.arch]
