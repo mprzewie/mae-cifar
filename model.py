@@ -152,19 +152,20 @@ class OrthogonalLinear(nn.Module):
 
         if O > I:
             # if in size is lower, pad with zeros
-            pad = torch.zeros(B, O - I, device=device)
-            x = torch.cat((x, pad), dim=1)
+            pad = torch.zeros(*x.shape[:-1], O - I, device=device)
+            x = torch.cat((x, pad), dim=-1)
 
         theta = r.norm() + 1e-8
 
         r_full = torch.cat([torch.tensor([1.0], device=device), r]).unsqueeze(0)  # Extend v with 1 for full vector
         r_unit = r_full / theta  # same normalization as A = R / θ
 
-        x0 = x[:, :1]
-        r_dot_x = torch.sum(x * r_unit, dim=1, keepdim=True)  # scalar per example
+        x0 = x[..., :1]
+        r_dot_x = torch.sum(x * r_unit, dim=-1, keepdim=True)  # scalar per example
 
-        e1 = torch.zeros(1, N, device=device)
-        e1[0,0] = 1.0
+        e1 = torch.zeros(N, device=device)
+        e1[0] = 1.0
+        e1 = e1.expand(*x.shape[:-1], -1)  # broadcast over all non-embedding dims
         Ax_fast = r_dot_x * e1 - x0 * r_unit   # (B, N)
 
         Ax0 = Ax_fast[:, :1]
@@ -183,10 +184,11 @@ class OrthogonalLinear(nn.Module):
 
         if O < I:
             # if out size is lower, cutout the latter part
-            x_ref = x_ref[:, :O]
+            x_ref = x_ref[..., :O]
 
         # # Step 4: Apply modulation (scaling each vector by m)
-        modulated = x_ref * m.unsqueeze(0)  # Apply modulation across the batch (B, N)
+        modulated = x_ref * m
+        # modulated = x_ref * m.view(*([1] * (x.dim() - 1)), -1)  # broadcast to final dim
 
         return modulated
 
