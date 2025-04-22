@@ -156,20 +156,19 @@ class OrthogonalLinear(nn.Module):
 
         theta = r.norm() + 1e-8
 
-        r_full = torch.zeros(N, device=device)
-        r_full[1:] = r
+        r_full = torch.cat([torch.tensor([1.0], device=device), r]).unsqueeze(0)  # Extend v with 1 for full vector
         r_unit = r_full / theta  # same normalization as A = R / θ
 
-        x0 = x[:, 0].unsqueeze(1)
+        x0 = x[:, :1]
         r_dot_x = torch.sum(x * r_unit, dim=1, keepdim=True)  # scalar per example
 
-        e1 = torch.zeros(N, device=device)
-        e1[0] = 1.0
-        Ax_fast = r_dot_x * e1.unsqueeze(0) - x0 * r_unit.unsqueeze(0)   # (B, N)
+        e1 = torch.zeros(1, N, device=device)
+        e1[0,0] = 1.0
+        Ax_fast = r_dot_x * e1 - x0 * r_unit   # (B, N)
 
-        Ax0 = Ax_fast[:, 0].unsqueeze(1)
+        Ax0 = Ax_fast[:, :1]
         r_dot_Ax = torch.sum(Ax_fast * r_unit, dim=1, keepdim=True)
-        A2x_fast = r_dot_Ax * e1.unsqueeze(0) - Ax0 * r_unit.unsqueeze(0)
+        A2x_fast = r_dot_Ax * e1 - Ax0 * r_unit
 
         x_rot = x + torch.sin(theta) * Ax_fast + (1 - torch.cos(theta)) * A2x_fast
 
@@ -219,7 +218,7 @@ class OrthogonalLinear(nn.Module):
         print("W-orthogonal unittest OK")
 
     def _unittest_fast_forward(self, B=10, eps=1e-5):
-        x = torch.randn(B, self.in_features)
+        x = torch.randn(B, self.in_features).to(self.v.device)
 
         out_slow = self.forward(x)
         out_fast = self.fast_forward(x)
@@ -592,15 +591,21 @@ class ViT_Classifier(torch.nn.Module):
 if __name__ == '__main__':
     from time import time
     from collections import defaultdict
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
+    print(device)
 
-    OrthogonalLinear(512, 512)._unittest_w_orthogonality()
-    OrthogonalLinear(512, 512)._unittest_fast_forward()
+    OrthogonalLinear(512, 512).to(device)._unittest_w_orthogonality()
+    OrthogonalLinear(512, 512).to(device)._unittest_fast_forward()
 
 
     results = dict(
         l11=defaultdict(list),
         l14=defaultdict(list),
         l41=defaultdict(list),
+        # t11=defaultdict(list),
+        # t14=defaultdict(list),
+        # t41=defaultdict(list),
         o11=defaultdict(list),
         o11f=defaultdict(list),
         o11s=defaultdict(list),
@@ -608,30 +613,41 @@ if __name__ == '__main__':
         o14f=defaultdict(list),
         o14s=defaultdict(list),
         o41f=defaultdict(list),
+        o41s=defaultdict(list),
     )
 
-    for emb in [192, 512, 768, 1024]: #, 2048]:
-        x = torch.randn((10, emb))
+    for emb in [512, 768, 1024, 2048]: #, 4096]:
+        x = torch.randn((512, emb)).to(device)
 
         lrs = dict(
             l11=nn.Linear(emb, emb),
             l14 = nn.Linear(emb, 4 * emb),
             l41 = nn.Linear(emb, emb // 4),
-            # o11 = OrthogonalLinear(emb, emb, forward_impl="slow"),
-            # o11f = OrthogonalLinear(emb, emb, forward_impl="fast"),
-            o11f = OrthogonalLinear(emb, emb, forward_impl="fast"),
+            # t11=TorchLinear(emb, emb),
+            # t14=TorchLinear(emb, 4 * emb),
+            # t41=TorchLinear(emb, emb // 4),
+            o11 = OrthogonalLinear(emb, emb, forward_impl="slow"),
+            # o11 = OrthogonalLinear(emb, emb, forward_impl="fast"),
+            o11f = OrthogonalLinear(emb, emb, forward_impl="fast"), #, mode="reduce-overhead", fullgraph=True),
             o14f = OrthogonalLinear(emb, 4 * emb, forward_impl="fast"),
-            o41f = OrthogonalLinear(emb, emb//4, forward_impl="fast")
-
+            # o14s = OrthogonalLinear(emb, 4 * emb, forward_impl="safe"),
+            o41f = OrthogonalLinear(emb, emb//4, forward_impl="fast"),
+            # o41s = OrthogonalLinear(emb, emb//4, forward_impl="safe")
+            # o11f=OrthogonalLinear(emb, emb, forward_impl="fast"),
+            # o14f=OrthogonalLinear(emb, 4 * emb, forward_impl="fast"),
+            # # o14s = OrthogonalLinear(emb, 4 * emb, forward_impl="safe"),
+            # o41f=OrthogonalLinear(emb, emb // 4, forward_impl="fast"),
         )
+        lrs = {k: v.to(device) for (k,v) in lrs.items()}
 
         from tqdm import tqdm
-        for _ in tqdm(range(10)):
+        for it in tqdm(range(100)):
             for l_name, l in lrs.items():
                 s = time()
                 y = l(x)
                 t = time()
                 # print(l_name)
+                # if it > 500:
                 results[l_name][emb].append(t-s)
 
         print(emb, {lr_name: np.mean(results[lr_name][emb]) for lr_name in lrs.keys()})
@@ -641,9 +657,10 @@ if __name__ == '__main__':
         X = sorted(results[lr_name].keys())
         Y = [np.mean(results[lr_name][emb]) for emb in X]
         std = [np.std(results[lr_name][emb]) for emb in X]
-        ls = "-" if "l" in lr_name else "--"
+        ls = "-" if "l" in lr_name else "--" if "o" in lr_name else ":" #if "t" in lr_name
         plt.errorbar(X, Y, yerr=std, label=lr_name, linestyle=ls)
 
+    plt.yscale("log")
     plt.legend()
     plt.show()
 
