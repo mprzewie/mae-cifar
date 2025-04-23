@@ -131,7 +131,8 @@ class OrthogonalLinear(nn.Module):
         elif self.forward_impl == "safe":
             out_slow = self.slow_forward(x)
             out_fast = self.fast_forward(x)
-            assert torch.allclose(out_fast, out_slow, atol=1e-5)
+            assert out_fast.shape == out_slow.shape
+            assert torch.allclose(out_fast, out_slow, atol=1e-5), (out_fast - out_slow).abs().max().item()
             return out_fast
 
         assert False, "unknown forward implementation"
@@ -161,23 +162,26 @@ class OrthogonalLinear(nn.Module):
         r_unit = r_full / theta  # same normalization as A = R / θ
 
         x0 = x[..., :1]
+
         r_dot_x = torch.sum(x * r_unit, dim=-1, keepdim=True)  # scalar per example
+        # print(x0.shape,(x * r_unit).shape, r_dot_x.shape)
 
         e1 = torch.zeros(N, device=device)
         e1[0] = 1.0
         e1 = e1.expand(*x.shape[:-1], -1)  # broadcast over all non-embedding dims
         Ax_fast = r_dot_x * e1 - x0 * r_unit   # (B, N)
 
-        Ax0 = Ax_fast[:, :1]
-        r_dot_Ax = torch.sum(Ax_fast * r_unit, dim=1, keepdim=True)
+        Ax0 = Ax_fast[..., :1]
+        r_dot_Ax = torch.sum(Ax_fast * r_unit, dim=-1, keepdim=True)
         A2x_fast = r_dot_Ax * e1 - Ax0 * r_unit
 
         x_rot = x + torch.sin(theta) * Ax_fast + (1 - torch.cos(theta)) * A2x_fast
 
-        # # Step 3: Apply Householder Reflection: Hx = x - 2vvᵀx / ‖v‖²
+        # Step 3: Apply Householder Reflection: Hx = x - 2vvᵀx / ‖v‖²
         v_full = torch.cat([torch.tensor([1.0], device=device), v])  # Extend v with 1 for full vector
         v_full = v_full / v_full.norm()  # Normalize v
         v_proj = torch.matmul(x_rot, v_full.unsqueeze(-1))  # Project x_rot onto v_full (B, N) * (N, 1) → (B, 1)
+
         v_proj = v_proj * v_full.unsqueeze(0)  # Broadcasting to (B, N)
 
         x_ref = x_rot - 2 * v_proj
@@ -194,7 +198,6 @@ class OrthogonalLinear(nn.Module):
 
     def fast_forward(self, x):
         Wx = self.apply_ortho_operator(x, self.r, self.v, self.m)
-
         return Wx if self.bias is None else Wx + self.bias
 
     def slow_forward(self, x):
@@ -276,11 +279,11 @@ class AttnBlock(Block):
 
 
 class QKV(torch.nn.Module):
-    def __init__(self, dim: int, bias: bool=True, num_reflections: int=1, apply_to: str = APPLY_TO_ALL):
+    def __init__(self, dim: int, bias: bool=True, num_reflections: int=1, apply_to: str = APPLY_TO_ALL, orto_impl: str = "slow"):
         super().__init__()
-        self.q = OrthogonalLinear(dim, dim, bias=bias, num_reflections=num_reflections)  if "q" in apply_to else nn.Linear(dim, dim, bias=bias)
-        self.k = OrthogonalLinear(dim, dim, bias=bias, num_reflections=num_reflections)  if "k" in apply_to else nn.Linear(dim, dim, bias=bias)
-        self.v = OrthogonalLinear(dim, dim, bias=bias, num_reflections=num_reflections)  if "v" in apply_to else nn.Linear(dim, dim, bias=bias)
+        self.q = OrthogonalLinear(dim, dim, bias=bias, num_reflections=num_reflections, forward_impl=orto_impl)  if "q" in apply_to else nn.Linear(dim, dim, bias=bias)
+        self.k = OrthogonalLinear(dim, dim, bias=bias, num_reflections=num_reflections, forward_impl=orto_impl)  if "k" in apply_to else nn.Linear(dim, dim, bias=bias)
+        self.v = OrthogonalLinear(dim, dim, bias=bias, num_reflections=num_reflections, forward_impl=orto_impl)  if "v" in apply_to else nn.Linear(dim, dim, bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         q = self.q(x)
@@ -290,18 +293,18 @@ class QKV(torch.nn.Module):
 
 
 class OrtoAttention(Attention):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_norm: bool = False, attn_drop=0., proj_drop=0., norm_layer: nn.Module = nn.LayerNorm, orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_norm: bool = False, attn_drop=0., proj_drop=0., norm_layer: nn.Module = nn.LayerNorm, orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL, orto_impl: str = "slow"):
         super().__init__(dim=dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_norm=qk_norm, attn_drop=attn_drop, proj_drop=proj_drop, norm_layer=norm_layer)
         if orto_reflections > 0:
-            self.qkv = QKV(dim, bias=qkv_bias, num_reflections=orto_reflections, apply_to=apply_to)
+            self.qkv = QKV(dim, bias=qkv_bias, num_reflections=orto_reflections, apply_to=apply_to, orto_impl=orto_impl)
             if "p" in apply_to:
-                self.proj = OrthogonalLinear(dim, dim, num_reflections=orto_reflections)
+                self.proj = OrthogonalLinear(dim, dim, num_reflections=orto_reflections, forward_impl=orto_impl)
 
 
 class OrtoMlp(Mlp):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
     """
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, bias=True, drop=0., orto_reflections: int = 0, apply_to: str="r1r2"):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, bias=True, drop=0., orto_reflections: int = 0, apply_to: str="r1r2", orto_impl: str = "slow"):
         super().__init__(
             in_features=in_features,
             hidden_features=hidden_features,
@@ -316,16 +319,16 @@ class OrtoMlp(Mlp):
 
         if orto_reflections > 0:
             if "r1" in apply_to:
-                self.fc1 = OrthogonalLinear(in_features, hidden_features, bias=bias[0], num_reflections=orto_reflections)
+                self.fc1 = OrthogonalLinear(in_features, hidden_features, bias=bias[0], num_reflections=orto_reflections, forward_impl=orto_impl)
             if "r2" in apply_to:
-                self.fc2 = OrthogonalLinear(hidden_features, out_features, bias=bias[1], num_reflections=orto_reflections)
+                self.fc2 = OrthogonalLinear(hidden_features, out_features, bias=bias[1], num_reflections=orto_reflections, forward_impl=orto_impl)
 
 
 class OrtoBlock(Block):
     def __init__(
             self,
             dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_norm: bool=False, proj_drop=0., attn_drop=0., init_values=None,
-            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_layer: nn.Module = Mlp, orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL):
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_layer: nn.Module = Mlp, orto_reflections: int = 0, apply_to: str = APPLY_TO_ALL, orto_impl: str = "slow"):
         super().__init__(
             dim=dim,
             num_heads=num_heads,
@@ -340,9 +343,40 @@ class OrtoBlock(Block):
             norm_layer=norm_layer,
             mlp_layer=mlp_layer
         )
-        self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=proj_drop, orto_reflections=orto_reflections, apply_to=apply_to)
+        self.attn = OrtoAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=proj_drop, orto_reflections=orto_reflections, apply_to=apply_to, orto_impl=orto_impl)
         if "r" in apply_to:
-            self.mlp = OrtoMlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=proj_drop, orto_reflections=orto_reflections)
+            self.mlp = OrtoMlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer, drop=proj_drop, orto_reflections=orto_reflections, apply_to=apply_to, orto_impl=orto_impl)
+
+
+    def _unittest_fast_slow(self, eps=1e-5):
+        dim = self.mlp.fc1.in_features
+        device = list(self.state_dict().items())[0][1].device
+        x = torch.randn(256, 50, dim).to(device)
+        torch.random.manual_seed(42)
+        b0 = OrtoBlock(dim=dim, num_heads=self.attn.num_heads, orto_reflections=1, orto_impl="fast", ).to(device)
+        torch.random.manual_seed(42)
+        b1 = OrtoBlock(dim=dim, num_heads=self.attn.num_heads, orto_reflections=1, orto_impl="fast",).to(device)
+        torch.random.manual_seed(42)
+        b2 = OrtoBlock(dim=dim, num_heads=self.attn.num_heads, orto_reflections=1, orto_impl="slow").to(device)
+        torch.random.manual_seed(42)
+        b3 = OrtoBlock(dim=dim, num_heads=self.attn.num_heads, orto_reflections=1, orto_impl="safe").to(device)
+
+        sb0, sb1, sb2, sb3 = [m.state_dict() for m in (b0, b1, b2, b3)]
+        for k, v0 in sb0.items():
+            v1 = sb1[k]
+            v2 = sb2[k]
+            v3 = sb3[k]
+            assert torch.equal(v0, v1), k
+            assert torch.equal(v1, v2), k
+            assert torch.equal(v2, v3), k
+
+
+        o0, o1, o2, o3 = [m(x) for m in (b0, b1, b2, b3)]
+        assert torch.allclose(o0, o1, atol=eps), (o0 - o1).abs().max()
+        assert torch.allclose(o1, o2, atol=eps), (o1 - o2).abs().max()
+        assert torch.allclose(o2, o3, atol=eps), (o2 - o3).abs().max()
+        print("Block fast-slow unittest passed")
+
 
 
 class MAE_Encoder(torch.nn.Module):
@@ -354,7 +388,8 @@ class MAE_Encoder(torch.nn.Module):
                  num_head=3,
                  orto_reflections: int = 0,
                  force_linear_block_every: int = 1000000,
-                 ortho_linear_apply_to: str = APPLY_TO_ALL
+                 ortho_linear_apply_to: str = APPLY_TO_ALL,
+                 orto_impl: str = "slow",
                  ) -> None:
         super().__init__()
 
@@ -370,7 +405,7 @@ class MAE_Encoder(torch.nn.Module):
         for b in range(num_layer):
             b_orref = 0 if (b % force_linear_block_every == 0) else orto_reflections
             blks.append(
-                OrtoBlock(emb_dim, num_head, orto_reflections=b_orref, apply_to=ortho_linear_apply_to)
+                OrtoBlock(emb_dim, num_head, orto_reflections=b_orref, apply_to=ortho_linear_apply_to, orto_impl=orto_impl)
             )
         self.transformer = torch.nn.Sequential(*blks)
 
@@ -436,7 +471,8 @@ class MAE_Decoder(torch.nn.Module):
                  out_size: int = None,
                  orto_reflections: int = 0,
                  force_linear_block_every: int = 1000000,
-                 ortho_linear_apply_to: str = APPLY_TO_ALL
+                 ortho_linear_apply_to: str = APPLY_TO_ALL,
+                 orto_impl: str = "slow",
                  ) -> None:
         super().__init__()
         out_size = out_size or 3 * patch_size ** 2
@@ -447,7 +483,7 @@ class MAE_Decoder(torch.nn.Module):
         for b in range(num_layer):
             b_orref = 0 if (b % force_linear_block_every == 0) else orto_reflections
             blks.append(
-                OrtoBlock(emb_dim, num_head, orto_reflections=b_orref, apply_to=ortho_linear_apply_to)
+                OrtoBlock(emb_dim, num_head, orto_reflections=b_orref, apply_to=ortho_linear_apply_to, orto_impl=orto_impl)
             )
         self.transformer = torch.nn.Sequential(*blks)
 
@@ -495,15 +531,16 @@ class MAE_ViT(torch.nn.Module):
                  latent_loss_detach_cls: bool = False,
                  orto_reflections: int = 0,
                  force_linear_block_every: int = 100000,
-                 ortho_linear_apply_to: str=APPLY_TO_ALL
+                 ortho_linear_apply_to: str=APPLY_TO_ALL,
+                 ortho_impl: str = "slow",
                  ) -> None:
         super().__init__()
 
         # self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
         self.latent_loss_block = latent_loss_block
 
-        self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, orto_reflections=orto_reflections, force_linear_block_every=force_linear_block_every, ortho_linear_apply_to=ortho_linear_apply_to)
-        self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=3 * patch_size ** 2, orto_reflections=orto_reflections, force_linear_block_every=force_linear_block_every, ortho_linear_apply_to=ortho_linear_apply_to)
+        self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, orto_reflections=orto_reflections, force_linear_block_every=force_linear_block_every, ortho_linear_apply_to=ortho_linear_apply_to, orto_impl=ortho_impl)
+        self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=3 * patch_size ** 2, orto_reflections=orto_reflections, force_linear_block_every=force_linear_block_every, ortho_linear_apply_to=ortho_linear_apply_to, orto_impl=ortho_impl)
         # self.l_decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head, out_size=emb_dim)
         # self.l_decoder.patch2img = nn.Identity()
 
@@ -591,17 +628,69 @@ class ViT_Classifier(torch.nn.Module):
         return logits
 
 
+    def _unittest_fast_slow(self, eps=1e-5):
+        dim = self.transformer[0].mlp.fc1.in_features
+        device = list(self.state_dict().items())[0][1].device
+        x = torch.randn(8, 3, 32, 32).to(device)
+        torch.random.manual_seed(42)
+        t0 = ViT_Classifier(MAE_Encoder(orto_impl="fast", orto_reflections=1)).to(device)
+        torch.random.manual_seed(42)
+        t1 =  ViT_Classifier(MAE_Encoder(orto_impl="fast", orto_reflections=1)).to(device)
+        torch.random.manual_seed(42)
+        t2 =  ViT_Classifier(MAE_Encoder(orto_impl="slow", orto_reflections=1)).to(device)
+        torch.random.manual_seed(42)
+        t3 =  ViT_Classifier(MAE_Encoder(orto_impl="safe", orto_reflections=1)).to(device)
 
+        sb0, sb1, sb2, sb3 = [m.state_dict() for m in (t0, t1, t2, t3)]
+        for k, v0 in sb0.items():
+            v1 = sb1[k]
+            v2 = sb2[k]
+            v3 = sb3[k]
+            assert torch.equal(v0, v1), k
+            assert torch.equal(v1, v2), k
+            assert torch.equal(v2, v3), k
+
+        o0, o1, o2, o3 = [m(x)[0] for m in (t0, t1, t2, t3)]
+        assert torch.allclose(o0, o1, atol=eps)
+        assert torch.allclose(o1, o2, atol=eps)
+        assert torch.allclose(o2, o3, atol=eps)
+        print("ViT fast-slow unittest passed")
 
 if __name__ == '__main__':
     from time import time
     from collections import defaultdict
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    device = torch.device('cpu')
+    # device = torch.device('cpu')
     print(device)
 
     OrthogonalLinear(512, 512).to(device)._unittest_w_orthogonality()
     OrthogonalLinear(512, 512).to(device)._unittest_fast_forward()
+    OrthogonalLinear(2048, 512).to(device)._unittest_fast_forward()
+    OrthogonalLinear(512, 2048).to(device)._unittest_fast_forward()
+    OrthogonalLinear(512, 512, bias=False).to(device)._unittest_fast_forward()
+
+    OrtoBlock(dim=192, num_heads=12).to(device)._unittest_fast_slow()
+
+    ViT_Classifier(MAE_Encoder(512)).to(device)._unittest_fast_slow()
+
+
+    kwargs = dict(
+        image_size=224,
+        patch_size=16,
+        emb_dim=768,
+        num_layer=12,
+        num_head=12,
+    )
+
+    reference = ViT_Classifier(MAE_Encoder(**kwargs, orto_reflections=0))
+    ref_n_params = sum([m.numel() for m in reference.parameters()])
+
+    for apply_to in ["", "qk", "qkv", "r1r2", "qkvr2", APPLY_TO_ALL]:
+        model = ViT_Classifier(MAE_Encoder(**kwargs, orto_reflections=1, ortho_linear_apply_to=apply_to))
+        n_params = sum([m.numel() for m in model.parameters()])
+
+        print(f"{apply_to=}\t{n_params=}\t({100 * (n_params / ref_n_params):.2f}%)")
+
 
 
     results = dict(
@@ -611,10 +700,10 @@ if __name__ == '__main__':
         # t11=defaultdict(list),
         # t14=defaultdict(list),
         # t41=defaultdict(list),
-        o11=defaultdict(list),
+        # o11=defaultdict(list),
         o11f=defaultdict(list),
         o11s=defaultdict(list),
-        o14=defaultdict(list),
+        # o14=defaultdict(list),
         o14f=defaultdict(list),
         o14s=defaultdict(list),
         o41f=defaultdict(list),
@@ -631,13 +720,13 @@ if __name__ == '__main__':
             # t11=TorchLinear(emb, emb),
             # t14=TorchLinear(emb, 4 * emb),
             # t41=TorchLinear(emb, emb // 4),
-            o11 = OrthogonalLinear(emb, emb, forward_impl="slow"),
+            o11s = OrthogonalLinear(emb, emb, forward_impl="slow"),
             # o11 = OrthogonalLinear(emb, emb, forward_impl="fast"),
             o11f = OrthogonalLinear(emb, emb, forward_impl="fast"), #, mode="reduce-overhead", fullgraph=True),
             o14f = OrthogonalLinear(emb, 4 * emb, forward_impl="fast"),
-            # o14s = OrthogonalLinear(emb, 4 * emb, forward_impl="safe"),
+            o14s = OrthogonalLinear(emb, 4 * emb, forward_impl="slow"),
             o41f = OrthogonalLinear(emb, emb//4, forward_impl="fast"),
-            # o41s = OrthogonalLinear(emb, emb//4, forward_impl="safe")
+            o41s = OrthogonalLinear(emb, emb//4, forward_impl="slow")
             # o11f=OrthogonalLinear(emb, emb, forward_impl="fast"),
             # o14f=OrthogonalLinear(emb, 4 * emb, forward_impl="fast"),
             # # o14s = OrthogonalLinear(emb, 4 * emb, forward_impl="safe"),

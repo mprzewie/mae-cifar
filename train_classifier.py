@@ -34,7 +34,8 @@ if __name__ == '__main__':
     parser.add_argument("--depth_expansion", type=int, default=1)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--force_linear_block_every", type=int, default=1000000)
-    parser.add_argument("--ortho_linear_apply_to", type=str, default="qkvpr")
+    parser.add_argument("--ortho_linear_apply_to", type=str, default="qkvpr1r2")
+    parser.add_argument("--ortho_linear_impl", type=str, default="slow")
 
 
     args = parser.parse_args()
@@ -72,8 +73,11 @@ if __name__ == '__main__':
         **vit_kwargs,
         image_size=args.resolution, patch_size=args.patch_size,
         orto_reflections=args.orto_reflections, force_linear_block_every=args.force_linear_block_every,
-        ortho_linear_apply_to=args.ortho_linear_apply_to
+        ortho_linear_apply_to=args.ortho_linear_apply_to,
+        ortho_impl=args.ortho_linear_impl,
     )
+
+    print(f'Model created, param count:{sum([m.numel() for m in model.parameters()])}')
 
     try:
         ckpt = torch.load(args.logdir / f"{args.arch}-mae.pt", map_location='cpu')
